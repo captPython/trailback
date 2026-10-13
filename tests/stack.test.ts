@@ -354,3 +354,15 @@ test('Go sends a prompt for the picked entry that asks for a brief and the open 
   expect(String(tree.result)).toContain('▶ 0.2  later  [active]')
   expect(String(tree.result)).toContain('0.1  current  [paused]')
 })
+
+test('finishing a paused entry drops the pause', () => {
+  let nodes: StackNode[] = []
+  nodes = applyOp(nodes, { op: 'push', id: '0', title: 'root' }, 0)
+  nodes = applyOp(nodes, { op: 'push', id: '0.1', title: 'a' }, 1)
+  nodes = applyOp(nodes, { op: 'add', id: '0.2', title: 'b' }, 2)
+  nodes = applyOp(nodes, { op: 'jump', id: '0.2' }, 3)
+  nodes = applyOp(nodes, { op: 'status', id: '0.1', state: 'done' }, 4)
+
+  expect(nodes.find(n => n.id === '0.1')?.isParked).toBeUndefined()
+  expect(renderText(nodes)).toContain('0.1  a  [done]')
+})

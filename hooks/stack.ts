@@ -101,7 +101,8 @@ function withState(node: StackNode, state: StackState, now: number): StackNode {
   if (node.state === state) return node
   const { isParked: _, ...rest } = node
 
-  return state === 'active' ? { ...rest, state, changedAt: now } : { ...node, state, changedAt: now }
+  // A pause ends when the entry is taken up again or finished.
+  return state === 'active' || state === 'done' ? { ...rest, state, changedAt: now } : { ...node, state, changedAt: now }
 }
 
 /** Whether `n` is paused by a jump, or holds a paused entry beneath it. */
