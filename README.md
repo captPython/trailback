@@ -79,7 +79,12 @@ TrailBack ships with Arjun Mode, a working style for long technical sessions:
 - one actionable step per reply, then wait for you
 - nested questions handled last-in, first-out, with the active level named in each reply
 - targeted questions instead of guesses when something is ambiguous
-- a short Verification & Confidence block at the end of every reply
+- a backup or dry run, a one-line impact and your confirmation before anything destructive
+- a short Verification & Confidence block at the end of every reply, rating unverified claims no
+  higher than Medium
+
+TrailBack adds these rules to Claude's instructions only while Arjun Mode is on. It does not read or
+change your own settings, hooks or memory files.
 
 Arjun Mode is on when you install. The **[ Arjun Mode ]** button at the top of the pane (or `a` while the
 pane has focus) switches it off and on at any time, from the next reply on; `ⓘ` shows a three-line

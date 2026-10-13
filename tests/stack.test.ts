@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { COLOR, applyOp, buildRows, depthColor, glyph, openBelow, pathToActive, renderText } from '../hooks/stack'
 import type { StackNode } from '../types'
+import { ARJUN } from '../hooks/persona'
 import { addTurn, bar, levelColor, rollup, shortTokens } from '../hooks/usage'
 
 const TOOL = 'mcp__trailback__stack'
@@ -633,4 +634,10 @@ describe('full review fixes', () => {
     expect(shortTokens(999_950)).toBe('1M')
     expect(shortTokens(999_949)).toBe('999.9k')
   })
+})
+
+test('Arjun Mode carries the safety guard and honest confidence, and nothing personal', () => {
+  expect(ARJUN).toContain('back up or dry-run, state the impact in one line, and get explicit confirmation')
+  expect(ARJUN).toContain('Medium at most')
+  expect(ARJUN).not.toMatch(/ARJUN_DIR|originSessionId|Hermes/)
 })
