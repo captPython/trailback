@@ -217,12 +217,12 @@ export type Guide = { text: string; depth: number }
 
 export type Row = { node: StackNode; depth: number; prefix: string; guides: Guide[]; isOnPath: boolean }
 
-/** The ids from the root down to the active node; empty when nothing is active. */
 /** How many entries under `id` are still open: what completing it would also close. */
 export function openBelow(nodes: readonly StackNode[], id: string): number {
   return nodes.filter(n => isAncestor(id, n.id) && n.state !== 'done').length
 }
 
+/** The ids from the root down to the active node; empty when nothing is active. */
 export function pathToActive(nodes: readonly StackNode[]): string[] {
   const active = nodes.find(n => n.state === 'active')
   if (!active) return []

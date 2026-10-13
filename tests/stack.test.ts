@@ -441,3 +441,80 @@ test('Done in the pane closes the picked entry and tells Claude on the next prom
   expect(String(after.result)).toContain('✓ 0.1  side  [done]')
   expect(String(after.result)).toContain('▶ 0.2  working  [active]')
 })
+
+describe('review fixes', () => {
+  const seed = [
+    { op: 'push', id: '0', title: 'root' },
+    { op: 'add', id: '0.1', title: 'side' },
+    { op: 'add', id: '0.3', title: 'other' },
+    { op: 'push', id: '0.2', title: 'working' },
+  ]
+
+  test('Go carries a Done made just before it, and the note is not sent twice', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    const sent: { text: string; context: readonly string[] }[] = []
+    on('prompt.submit', (_$, e) => {
+      sent.push({ text: e.text, context: e.context ?? [] })
+
+      return { text: e.text, context: e.context }
+    })
+    await $.tool.call({ tool: TOOL, ops: seed })
+    await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
+    await $.ui.press({ plugin: 'trailback', key: 'done' })
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.3' })
+    await $.ui.press({ plugin: 'trailback', key: 'go' })
+    await $.prompt.submit({ text: 'typed later', wait: false, origin: { kind: 'composer' } })
+
+    expect(sent[0]?.text).toContain('I closed 0.1 "side" in the pane')
+    expect(sent[1]?.context.join('\n')).not.toContain('0.1')
+  })
+
+  test('a reset drops Done notes for entries that are gone', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    let seen: readonly string[] = []
+    on('prompt.submit', (_$, e) => {
+      seen = e.context ?? []
+
+      return { text: e.text, context: e.context }
+    })
+    await $.tool.call({ tool: TOOL, ops: seed })
+    await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
+    await $.ui.press({ plugin: 'trailback', key: 'done' })
+    await $.tool.call({ tool: TOOL, op: 'reset' })
+    await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+
+    expect(seen.join('\n')).not.toContain('marked 0.1')
+  })
+
+  test('Done on an entry Claude already closed sends no note', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    let seen: readonly string[] = []
+    on('prompt.submit', (_$, e) => {
+      seen = e.context ?? []
+
+      return { text: e.text, context: e.context }
+    })
+    await $.tool.call({ tool: TOOL, ops: seed })
+    await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
+    await $.tool.call({ tool: TOOL, op: 'add', id: '0.1', title: 'side', state: 'done' })
+    await $.ui.press({ plugin: 'trailback', key: 'done' }).catch(() => undefined)
+    await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+
+    expect(seen.join('\n')).not.toContain('marked 0.1')
+  })
+
+  test('complete is the pane\'s alone: the model is not offered it', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    await $.tool.call({ tool: TOOL, ops: seed })
+    const ran = await $.tool.call({ tool: TOOL, op: 'complete', id: '0.1' })
+
+    expect(ran.deny).toContain('unknown op')
+  })
+})

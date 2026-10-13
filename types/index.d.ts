@@ -18,6 +18,9 @@ export type StackNode = {
   outTokens?: number
 }
 
+/** An entry the user closed with Done, and how many open entries closed with it. */
+export type PendingDone = { id: string; title: string; closing: number }
+
 /** One rate-limit window as the last response reported it. */
 export type QuotaWindow = { kind: string; percentUsed: number; resetsAt?: string }
 
@@ -37,8 +40,8 @@ declare module 'claude-code' {
       isTouched: boolean
       /** Whether the next prompt carries a reminder to update the stack. */
       isReminderDue: boolean
-      /** Notes for Claude about changes the user made in the pane, sent with the next prompt. */
-      pendingNotes: string[]
+      /** Entries the user closed in the pane that Claude has not been told about yet. */
+      pendingDone: PendingDone[]
       /** Whether the pane shows the three-line explainer of Arjun Mode, and the legend and keys. */
       isInfoShown: boolean
       isHelpShown: boolean

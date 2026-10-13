@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
-import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, doneNote, jumpNote } from './persona'
+import type { PendingDone, QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
+import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, closedSentence, doneNote, jumpNote } from './persona'
 import { addTurn, bar, levelColor, rollup, shortTokens } from './usage'
 import {
   BADGE,
@@ -39,13 +39,14 @@ const reminderAtom = atom({ plugin: 'trailback', key: 'isReminderDue' } as const
 const usageShownAtom = atom({ plugin: 'trailback', key: 'isUsageShown' } as const, false)
 const infoAtom = atom({ plugin: 'trailback', key: 'isInfoShown' } as const, false)
 const helpAtom = atom({ plugin: 'trailback', key: 'isHelpShown' } as const, false)
-const pendingAtom = atom({ plugin: 'trailback', key: 'pendingNotes' } as const, [] as string[])
+const pendingAtom = atom({ plugin: 'trailback', key: 'pendingDone' } as const, [] as PendingDone[])
 const usageAtom = atom({ plugin: 'trailback', key: 'usage' } as const, { windows: [] } as UsageSnapshot)
 
 const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
 const WARN_AT = 90
 
-const OPS = ['push', 'add', 'pop', 'status', 'focus', 'jump', 'complete', 'remove', 'reset']
+// What the model may send; `complete` is the pane's Done alone, so it is not offered here.
+const OPS = ['push', 'add', 'pop', 'status', 'focus', 'jump', 'remove', 'reset']
 
 const TOOL_SCHEMA = {
   type: 'object',
@@ -188,7 +189,9 @@ async function go($: EngineInterface) {
   await update($, nodesAtom, list => applyOp(list, { op: 'jump', id: to.id }, now))
   await update($, nextAtom, () => '')
   await refresh($)
-  await $.prompt.submit({ text: briefPrompt(to), asUser: true })
+  const closed = await takePending($)
+  const text = closed.length === 0 ? briefPrompt(to) : `${briefPrompt(to)} ${closedSentence(closed)}`
+  await $.prompt.submit({ text, asUser: true })
 }
 
 async function toggleInfo($: EngineInterface) {
@@ -201,21 +204,18 @@ async function toggleHelp($: EngineInterface) {
 
 /** Done: close the picked entry and its open children by hand; Claude hears of it on the next prompt. */
 async function completePicked($: EngineInterface) {
-  const [nodes, nextId] = await Promise.all([read($, nodesAtom), read($, nextAtom)])
-  const node = nodes.find(n => n.id === nextId)
-  if (!node) return
-  const closing = openBelow(nodes, node.id)
+  const nextId = await read($, nextAtom)
+  if (!nextId) return
   const now = await $.clock.now()
-  let failure: string | undefined
-  await update($, nodesAtom, list => {
-    failure = undefined
-    try {
-      return applyOp(list, { op: 'complete', id: node.id }, now)
-    } catch (err) {
-      failure = err instanceof Error ? err.message : String(err)
+  // What is closed, and what the note says, both come from the list the close applies to.
+  let closed: PendingDone | undefined
+  const failure = await applySafely($, list => {
+    closed = undefined
+    const node = list.find(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
+    if (!node) return list
+    closed = { id: node.id, title: node.title, closing: openBelow(list, node.id) }
 
-      return list
-    }
+    return applyOp(list, { op: 'complete', id: node.id }, now)
   })
   if (failure) {
     $.ui.toast(`TrailBack: ${failure}`)
@@ -223,8 +223,36 @@ async function completePicked($: EngineInterface) {
     return
   }
   await update($, nextAtom, () => '')
-  await update($, pendingAtom, list => [...list, doneNote(node, closing)])
+  if (closed) {
+    const done = closed
+    await update($, pendingAtom, list => [...list, done])
+  }
   await refresh($)
+}
+
+/** Applies a change to the stack; resolves the error's message when it threw, the stack untouched. */
+async function applySafely($: EngineInterface, change: (list: StackNode[]) => StackNode[]): Promise<string | undefined> {
+  let failure: string | undefined
+  await update($, nodesAtom, list => {
+    failure = undefined
+    try {
+      return change(list)
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err)
+
+      return list
+    }
+  })
+
+  return failure
+}
+
+/** The closes not yet told to Claude, minus any whose entry is gone; clears the queue. */
+async function takePending($: EngineInterface): Promise<PendingDone[]> {
+  const [pending, nodes] = await Promise.all([read($, pendingAtom), read($, nodesAtom)])
+  if (pending.length > 0) await update($, pendingAtom, () => [])
+
+  return pending.filter(p => nodes.some(n => n.id === p.id))
 }
 
 async function pick($: EngineInterface, id: string) {
@@ -282,11 +310,7 @@ export const register: Register = on => {
       await update($, nextAtom, () => '')
       await refresh($)
     }
-    const pending = await read($, pendingAtom)
-    if (pending.length > 0) {
-      notes.push(...pending)
-      await update($, pendingAtom, () => [])
-    }
+    notes.push(...(await takePending($)).map(p => doneNote(p, p.closing)))
     if (await read($, reminderAtom)) {
       notes.push(REMINDER)
       await update($, reminderAtom, () => false)
@@ -318,17 +342,9 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'mcp__trailback__stack' }, async ($, e) => {
     const now = await $.clock.now().catch(() => Date.now())
-    let failure: string | undefined
-    await update($, nodesAtom, list => {
-      failure = undefined
-      try {
-        return toOps(e as unknown as Record<string, unknown>).reduce((acc, op) => applyOp(acc, op, now), list)
-      } catch (err) {
-        failure = err instanceof Error ? err.message : String(err)
-
-        return list
-      }
-    })
+    const failure = await applySafely($, list =>
+      toOps(e as unknown as Record<string, unknown>).reduce((acc, op) => applyOp(acc, op, now), list),
+    )
     if (failure) return { deny: failure }
     await update($, touchedAtom, () => true)
     await refresh($).catch(() => undefined)
@@ -368,6 +384,7 @@ export const register: Register = on => {
     if (arg === 'reset') {
       await update($, nodesAtom, () => [])
       await update($, nextAtom, () => '')
+      await update($, pendingAtom, () => [])
       await refresh($)
 
       return { text: 'TrailBack stack cleared for this project.' }
@@ -481,7 +498,7 @@ export const register: Register = on => {
           ))}
         </Text>
         <Text dimColor wrap="truncate-end">
-          › pick next · g go · a Arjun Mode · ⓘ about · h hide (focus the pane: ctrl+x tab)
+          › pick next · g go · d done · a Arjun Mode · ⓘ about · h hide (focus the pane: ctrl+x tab)
         </Text>
       </Box>
     ) : (
@@ -531,6 +548,7 @@ export const register: Register = on => {
           const markColor = isPausing ? 'claude' : isPicked ? 'text' : COLOR[state]
           const pathColor = COLOR.active
           const spent = rollup(nodes, node.id)
+          const below = isPicked ? openBelow(nodes, node.id) : 0
           const badge = !isRich
             ? undefined
             : isPausing
@@ -600,7 +618,7 @@ export const register: Register = on => {
                   {!isOnPath && (
                     <Box marginLeft={1}>
                       <Button key="done" hotkey="d" onPress={() => completePicked($)}>
-                        {openBelow(nodes, node.id) > 0 ? `✓ Done +${openBelow(nodes, node.id)}` : '✓ Done'}
+                        {below > 0 ? `✓ Done +${below}` : '✓ Done'}
                       </Button>
                     </Box>
                   )}

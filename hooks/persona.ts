@@ -39,6 +39,13 @@ export const ONE_SHOT = [
   'even where earlier replies in this conversation went one step at a time. Keep updating the TrailBack stack.',
 ].join('\n')
 
+/** Go's own prompt skips the plugin's prompt.submit hook, so closes ride in its text, in the user's voice. */
+export function closedSentence(closed: readonly { id: string; title: string }[]): string {
+  const names = closed.map(c => `${c.id} "${c.title}"`).join(', ')
+
+  return `Also, I closed ${names} in the pane, so treat ${closed.length === 1 ? 'it' : 'them'} as finished.`
+}
+
 /** Told to Claude on the next prompt after the user closes an entry from the pane. */
 export function doneNote(node: { id: string; title: string }, closing: number): string {
   const under = closing > 0 ? `, with ${closing} open ${closing === 1 ? 'item' : 'items'} under it` : ''
@@ -46,7 +53,7 @@ export function doneNote(node: { id: string; title: string }, closing: number): 
   return `TrailBack: the user marked ${node.id} "${node.title}" done in the pane${under}. Treat it as finished; do not reopen it unless they ask.`
 }
 
-export const REMINDER ='TrailBack: the stack was not updated last turn. If the topic moved, call the `stack` tool now to bring the tree in line.'
+export const REMINDER = 'TrailBack: the stack was not updated last turn. If the topic moved, call the `stack` tool now to bring the tree in line.'
 
 export function jumpNote(to: { id: string; title: string }, from?: { id: string; title: string }): string {
   const paused = from ? `; ${from.id} "${from.title}" is paused` : ''
