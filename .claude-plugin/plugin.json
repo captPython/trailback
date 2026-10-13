@@ -1,0 +1,11 @@
+{
+  "name": "trailback",
+  "version": "0.1.0",
+  "description": "TrailBack: a live tree of your conversation's context stack, with the Arjun step-by-step persona you can switch on and off from the pane",
+  "author": { "name": "captPython" },
+  "license": "MIT",
+  "homepage": "https://github.com/captPython/trailback",
+  "repository": "https://github.com/captPython/trailback",
+  "keywords": ["stack", "tree", "focus", "persona", "lifo"],
+  "types": "./types/index.d.ts"
+}

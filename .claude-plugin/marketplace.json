@@ -1,0 +1,13 @@
+{
+  "name": "trailback",
+  "description": "TrailBack: see your conversation's context stack as a live tree, with an optional step-by-step persona",
+  "owner": {
+    "name": "captPython"
+  },
+  "plugins": [
+    {
+      "name": "trailback",
+      "source": "./"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">TrailBack: footprints walking up the trail</title>
+  <defs>
+    <!-- A right footprint, toes up, centred on the ball of the foot -->
+    <g id="foot">
+      <path d="M2,-20 C15,-21 19,-6 17,8 C15,22 11,34 1,37 C-9,36 -13,26 -13,14 C-13,4 -9,-2 -11,-10 C-13,-18 -8,-20 2,-20 Z"/>
+      <ellipse cx="-7" cy="-31" rx="5.2" ry="6.6"/>
+      <ellipse cx="2" cy="-34" rx="3.8" ry="4.6"/>
+      <ellipse cx="9" cy="-32" rx="3.4" ry="4.1"/>
+      <ellipse cx="14.5" cy="-27.5" rx="3" ry="3.6"/>
+      <ellipse cx="18.5" cy="-21.5" rx="2.6" ry="3"/>
+    </g>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="#ffffff"/>
+  <g fill="#000000">
+    <use xlink:href="#foot" href="#foot" transform="translate(60.9 200.5) rotate(37.5) scale(-0.8 0.8)"/>
+    <use xlink:href="#foot" href="#foot" transform="translate(114.5 160.1) rotate(37.5) scale(0.8)"/>
+    <use xlink:href="#foot" href="#foot" transform="translate(139.5 97.9) rotate(37.5) scale(-0.8 0.8)"/>
+    <use xlink:href="#foot" href="#foot" transform="translate(193.1 57.5) rotate(37.5) scale(0.8)"/>
+  </g>
+</svg>
