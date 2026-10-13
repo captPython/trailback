@@ -366,3 +366,24 @@ test('finishing a paused entry drops the pause', () => {
   expect(nodes.find(n => n.id === '0.1')?.isParked).toBeUndefined()
   expect(renderText(nodes)).toContain('0.1  a  [done]')
 })
+
+test('the active row animates: the spinner turns and the badge blinks as time passes', async ($, on) => {
+  on('session.cwd', () => ({ value: CWD }))
+  const clock = mock.clock(on, { now: 1_000 })
+  await $.tool.call({ tool: TOOL, ops: [{ op: 'push', id: '0', title: 'root' }] })
+  const pane = await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
+  const text = async () => JSON.stringify(await pane.drawn())
+  const frame = (drawn: string) => ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'].find(g => drawn.includes(g))
+
+  const first = await text()
+  await clock.advance(100)
+  await clock.settle()
+  const second = await text()
+  await clock.advance(600)
+  await clock.settle()
+  const third = await text()
+
+  expect(frame(first)).toBeDefined()
+  expect(frame(second)).not.toBe(frame(first))
+  expect(third.includes('"backgroundColor":"success"')).not.toBe(second.includes('"backgroundColor":"success"'))
+})
