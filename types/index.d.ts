@@ -18,6 +18,12 @@ export type StackNode = {
   outTokens?: number
 }
 
+/**
+ * Go, waiting for its own turn to start: the entry to switch to, the prompt it sent,
+ * and the closes and reminder that prompt carries, to be marked as told then.
+ */
+export type GoRequest = { id: string; text: string; doneIds: string[]; isCarryingReminder: boolean }
+
 /** An entry the user closed with Done, and how many open entries closed with it. */
 export type PendingDone = { id: string; title: string; closing: number }
 
@@ -42,6 +48,8 @@ declare module 'claude-code' {
       isReminderDue: boolean
       /** Entries the user closed in the pane that Claude has not been told about yet. */
       pendingDone: PendingDone[]
+      /** Go's switch, applied when the turn its prompt starts begins; null when none waits. */
+      goRequest: GoRequest | null
       /** Whether the pane shows the three-line explainer of Arjun Mode, and the legend and keys. */
       isInfoShown: boolean
       isHelpShown: boolean

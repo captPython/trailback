@@ -105,6 +105,10 @@ The active entry shows the turns spent on it and their output tokens, its childr
 The stack is saved per project folder. A new or resumed session in the same folder picks up the trail
 where it was; `/trail reset` clears it for that folder.
 
+There is one saved trail per folder. Two sessions open in the same folder each keep their own tree
+while they run, and the one that changes its tree last is the one saved. A session that starts with
+nothing to show never overwrites a saved trail.
+
 ## Commands
 
 | Command | Does |

@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { PendingDone, QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
-import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, closedSentence, doneNote, jumpNote } from './persona'
+import type { GoRequest, PendingDone, QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
+import { ARJUN, ARJUN_ABOUT, GO_REMINDER, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, closedSentence, doneNote, jumpNote } from './persona'
 import { addTurn, bar, levelColor, rollup, shortTokens } from './usage'
 import {
   BADGE,
@@ -14,6 +14,7 @@ import {
   buildRows,
   depthColor,
   glyph,
+  isPickable,
   isAnimating,
   isBlinkOn,
   isFlashing,
@@ -39,6 +40,7 @@ const reminderAtom = atom({ plugin: 'trailback', key: 'isReminderDue' } as const
 const usageShownAtom = atom({ plugin: 'trailback', key: 'isUsageShown' } as const, false)
 const infoAtom = atom({ plugin: 'trailback', key: 'isInfoShown' } as const, false)
 const helpAtom = atom({ plugin: 'trailback', key: 'isHelpShown' } as const, false)
+const goAtom = atom({ plugin: 'trailback', key: 'goRequest' } as const, null as GoRequest | null)
 const pendingAtom = atom({ plugin: 'trailback', key: 'pendingDone' } as const, [] as PendingDone[])
 const usageAtom = atom({ plugin: 'trailback', key: 'usage' } as const, { windows: [] } as UsageSnapshot)
 
@@ -116,9 +118,21 @@ async function stackKey($: EngineInterface): Promise<string | undefined> {
   return cwd ? `stack:${cwd}` : undefined
 }
 
-async function saveStack($: EngineInterface) {
+/** What this session last wrote, so an unchanged tree is not written again. */
+let lastSaved = ''
+
+/**
+ * Saves the tree for this folder when it changed. An empty tree is saved only when
+ * `isClearing` (a reset), so a fresh session cannot wipe the trail another one left.
+ */
+async function saveStack($: EngineInterface, isClearing = false) {
   const key = await stackKey($)
-  if (key) await $.store.set(key, { nodes: await read($, nodesAtom) }).catch(() => undefined)
+  const nodes = await read($, nodesAtom)
+  const json = JSON.stringify(nodes)
+  if (!key || json === lastSaved || (nodes.length === 0 && !isClearing)) return
+  await $.store.set(key, { nodes }).then(() => {
+    lastSaved = json
+  }, () => undefined)
 }
 
 async function savePrefs($: EngineInterface) {
@@ -180,18 +194,42 @@ async function takeUsage(
   }
 }
 
-/** Go: switch to the picked entry now, then send a prompt that asks for a brief on it. */
+/**
+ * Go: send a prompt that asks for a brief on the picked entry. A plugin's prompt runs
+ * once the session is idle and skips this plugin's prompt.submit hook, so the switch,
+ * the closes and the reminder it carries are applied when that prompt's turn starts.
+ */
 async function go($: EngineInterface) {
-  const [nodes, nextId] = await Promise.all([read($, nodesAtom), read($, nextAtom)])
-  const to = nodes.find(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
+  const [nodes, nextId, pending, isReminderDue] = await Promise.all([
+    read($, nodesAtom),
+    read($, nextAtom),
+    read($, pendingAtom),
+    read($, reminderAtom),
+  ])
+  const to = nodes.find(n => n.id === nextId && isPickable(n))
   if (!to) return
-  const now = await $.clock.now()
-  await update($, nodesAtom, list => applyOp(list, { op: 'jump', id: to.id }, now))
-  await update($, nextAtom, () => '')
-  await refresh($)
-  const closed = await takePending($)
-  const text = closed.length === 0 ? briefPrompt(to) : `${briefPrompt(to)} ${closedSentence(closed)}`
+  const closed = stillClosed(pending, nodes)
+  const parts = [briefPrompt(to)]
+  if (closed.length > 0) parts.push(closedSentence(closed))
+  if (isReminderDue) parts.push(GO_REMINDER)
+  const text = parts.join(' ')
+  await update($, goAtom, () => ({ id: to.id, text, doneIds: closed.map(c => c.id), isCarryingReminder: isReminderDue }))
   await $.prompt.submit({ text, asUser: true })
+}
+
+/** The turn Go's prompt started: switch now, and mark what its text told Claude as told. */
+async function startGo($: EngineInterface, request: GoRequest) {
+  const now = await $.clock.now()
+  await applySafely($, list => {
+    const to = list.find(n => n.id === request.id && isPickable(n))
+
+    return to ? applyOp(list, { op: 'jump', id: to.id }, now) : list
+  })
+  await update($, nextAtom, current => (current === request.id ? '' : current))
+  await update($, pendingAtom, list => list.filter(p => !request.doneIds.includes(p.id)))
+  if (request.isCarryingReminder) await update($, reminderAtom, () => false)
+  await update($, goAtom, () => null)
+  await refresh($)
 }
 
 async function toggleInfo($: EngineInterface) {
@@ -211,7 +249,7 @@ async function completePicked($: EngineInterface) {
   let closed: PendingDone | undefined
   const failure = await applySafely($, list => {
     closed = undefined
-    const node = list.find(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
+    const node = list.find(n => n.id === nextId && isPickable(n))
     if (!node) return list
     closed = { id: node.id, title: node.title, closing: openBelow(list, node.id) }
 
@@ -247,12 +285,24 @@ async function applySafely($: EngineInterface, change: (list: StackNode[]) => St
   return failure
 }
 
-/** The closes not yet told to Claude, minus any whose entry is gone; clears the queue. */
+/** The closes whose entry is still there and still done: a reset or a reused id drops them. */
+function stillClosed(pending: readonly PendingDone[], nodes: readonly StackNode[]): PendingDone[] {
+  return pending.filter(p => nodes.some(n => n.id === p.id && n.state === 'done'))
+}
+
+/** The closes not yet told to Claude that still hold; clears the queue. */
 async function takePending($: EngineInterface): Promise<PendingDone[]> {
   const [pending, nodes] = await Promise.all([read($, pendingAtom), read($, nodesAtom)])
   if (pending.length > 0) await update($, pendingAtom, () => [])
 
-  return pending.filter(p => nodes.some(n => n.id === p.id))
+  return stillClosed(pending, nodes)
+}
+
+/** After a reset, nothing picked, pending or handed over refers to the old tree any more. */
+async function forgetPaneState($: EngineInterface) {
+  await update($, nextAtom, () => '')
+  await update($, pendingAtom, () => [])
+  await update($, goAtom, () => null)
 }
 
 async function pick($: EngineInterface, id: string) {
@@ -265,7 +315,10 @@ export const register: Register = on => {
     // Restore first: the trail comes back even if a registration below fails.
     await restore($)
     await refresh($)
-    await takeUsage($, await $.session.usage()).catch(() => undefined)
+    await $.session
+      .usage()
+      .then(figures => takeUsage($, figures))
+      .catch(() => undefined)
     await $.tool.register({
       name: 'stack',
       description:
@@ -294,15 +347,19 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    // Typed over a running turn: the pick, the notes and the turn's bookkeeping wait for an idle prompt.
+    if (e.turnId) return next(e)
     const notes: string[] = []
     await update($, touchedAtom, () => false)
+    // A Go whose prompt never started a turn (dropped, or overtaken by this one) is void.
+    await update($, goAtom, () => null)
 
     const nextId = await read($, nextAtom)
     if (nextId) {
       const nodes = await read($, nodesAtom)
       const to = nodes.find(n => n.id === nextId)
       const from = nodes.find(n => n.state === 'active')
-      if (to && to.state !== 'done' && to.state !== 'active') {
+      if (to && isPickable(to)) {
         const now = await $.clock.now()
         await update($, nodesAtom, list => applyOp(list, { op: 'jump', id: to.id }, now))
         notes.push(jumpNote(to, from))
@@ -310,7 +367,7 @@ export const register: Register = on => {
       await update($, nextAtom, () => '')
       await refresh($)
     }
-    notes.push(...(await takePending($)).map(p => doneNote(p, p.closing)))
+    notes.push(...(await takePending($)).map(doneNote))
     if (await read($, reminderAtom)) {
       notes.push(REMINDER)
       await update($, reminderAtom, () => false)
@@ -318,6 +375,14 @@ export const register: Register = on => {
 
     return next(notes.length === 0 ? e : { ...e, context: [...(e.context ?? []), ...notes] })
   }).catch((_$, e, next) => next(e))
+
+  on('turn.start', async ($, e, next) => {
+    await update($, touchedAtom, () => false)
+    const request = await read($, goAtom)
+    if (request && e.text === request.text) await startGo($, request)
+
+    return next(e)
+  })
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
@@ -347,7 +412,11 @@ export const register: Register = on => {
     )
     if (failure) return { deny: failure }
     await update($, touchedAtom, () => true)
+    const input = e as unknown as Record<string, unknown>
+    const isReset = input.op === 'reset' || (Array.isArray(input.ops) && input.ops.some(o => (o as { op?: unknown })?.op === 'reset'))
+    if (isReset) await forgetPaneState($)
     await refresh($).catch(() => undefined)
+    if (isReset) await saveStack($, true)
 
     return { result: renderText(await read($, nodesAtom)) }
   }).catch(() => ({ deny: 'trailback: the stack could not be updated; carry on and retry later' }))
@@ -383,9 +452,9 @@ export const register: Register = on => {
     }
     if (arg === 'reset') {
       await update($, nodesAtom, () => [])
-      await update($, nextAtom, () => '')
-      await update($, pendingAtom, () => [])
+      await forgetPaneState($)
       await refresh($)
+      await saveStack($, true)
 
       return { text: 'TrailBack stack cleared for this project.' }
     }
@@ -544,10 +613,10 @@ export const register: Register = on => {
           const isPicked = node.id === nextId && !isActive && state !== 'done'
           const isPausing = isActive && isPauseDue
           const isQuiet = state === 'done' || state === 'pending' || (state === 'suspended' && !isRich)
-          const isPickable = !isActive && state !== 'done'
+          const isRowPickable = isPickable(node)
           const markColor = isPausing ? 'claude' : isPicked ? 'text' : COLOR[state]
           const pathColor = COLOR.active
-          const spent = rollup(nodes, node.id)
+          const spent = isActive || isUsageShown ? rollup(nodes, node.id) : { turns: 0, outTokens: 0 }
           const below = isPicked ? openBelow(nodes, node.id) : 0
           const badge = !isRich
             ? undefined
@@ -564,7 +633,7 @@ export const register: Register = on => {
           return (
             <Box flexDirection="row" justifyContent="space-between">
               <Box flexDirection="row" flexShrink={1}>
-                {isPickable ? (
+                {isRowPickable ? (
                   <Button key={`pick:${node.id}`} plain dimColor={!isPicked} onPress={() => pick($, node.id)}>
                     {isPicked ? '➜' : '›'}
                   </Button>

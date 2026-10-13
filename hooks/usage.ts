@@ -1,6 +1,7 @@
 // Token and quota figures: pure helpers the pane and the turn hook share.
 
 import type { StackNode } from '../types'
+import { isAncestor } from './stack'
 
 /** A bar of `width` cells, `▓` for the used share. */
 export function bar(percent: number, width: number): string {
@@ -16,7 +17,8 @@ export function levelColor(percent: number): string {
 
 export function shortTokens(n: number): string {
   if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  // Round first, then pick the unit, so 999,950 reads 1M rather than 1000k.
+  if (Math.round(n / 100) < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
 
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
 }
@@ -31,7 +33,7 @@ export function addTurn(nodes: readonly StackNode[], outTokens: number): StackNo
 /** An entry's turns and output tokens with everything beneath it. */
 export function rollup(nodes: readonly StackNode[], id: string): { turns: number; outTokens: number } {
   return nodes
-    .filter(n => n.id === id || n.id.startsWith(`${id}.`))
+    .filter(n => n.id === id || isAncestor(id, n.id))
     .reduce((sum, n) => ({ turns: sum.turns + (n.turns ?? 0), outTokens: sum.outTokens + (n.outTokens ?? 0) }), {
       turns: 0,
       outTokens: 0,

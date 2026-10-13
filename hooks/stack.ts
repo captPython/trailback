@@ -78,7 +78,8 @@ function checkId(id: unknown): string {
   return id
 }
 
-function isAncestor(maybe: string, of: string): boolean {
+/** Whether `maybe` is a parent, grandparent, ... of `of` by its dotted id. */
+export function isAncestor(maybe: string, of: string): boolean {
   return of.startsWith(`${maybe}.`)
 }
 
@@ -155,6 +156,10 @@ export function applyOp(nodes: readonly StackNode[], op: StackOp, now: number): 
     }
     case 'add': {
       const id = checkId(op.id)
+      // Re-adding an entry that exists (a restated plan) renames it and keeps its state.
+      if (op.state === undefined && list.some(n => n.id === id)) {
+        return list.map(n => (n.id === id ? { ...n, title: op.title || n.title } : n))
+      }
       const state = op.state ?? 'pending'
       const added = upsert(list, id, op.title, state === 'active' ? 'pending' : state, now)
 
@@ -216,6 +221,11 @@ export function applyOp(nodes: readonly StackNode[], op: StackOp, now: number): 
 export type Guide = { text: string; depth: number }
 
 export type Row = { node: StackNode; depth: number; prefix: string; guides: Guide[]; isOnPath: boolean }
+
+/** Whether the pane may pick the entry for Go or Done: open and not the one being worked on. */
+export function isPickable(node: StackNode): boolean {
+  return node.state !== 'active' && node.state !== 'done'
+}
 
 /** How many entries under `id` are still open: what completing it would also close. */
 export function openBelow(nodes: readonly StackNode[], id: string): number {

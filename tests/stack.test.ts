@@ -334,6 +334,7 @@ test('Go sends a prompt for the picked entry that asks for a brief and the open 
 
     return { text: e.text, context: e.context }
   })
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   await $.tool.call({
     tool: TOOL,
     ops: [
@@ -345,6 +346,8 @@ test('Go sends a prompt for the picked entry that asks for a brief and the open 
   await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
   await $.ui.press({ plugin: 'trailback', key: 'pick:0.2' })
   await $.ui.press({ plugin: 'trailback', key: 'go' })
+  // A session starts the Go prompt's turn once it is idle; the switch happens then.
+  await $.turn.start({ text: sent, turnId: 'go-turn' } as never)
 
   expect(sent).toContain('Resume 0.2 "later"')
   expect(sent).toContain('1 to 3 lines')
@@ -459,12 +462,14 @@ describe('review fixes', () => {
 
       return { text: e.text, context: e.context }
     })
+    on('turn.start', (_$, e) => ({ turnId: e.turnId }))
     await $.tool.call({ tool: TOOL, ops: seed })
     await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
     await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
     await $.ui.press({ plugin: 'trailback', key: 'done' })
     await $.ui.press({ plugin: 'trailback', key: 'pick:0.3' })
     await $.ui.press({ plugin: 'trailback', key: 'go' })
+    await $.turn.start({ text: sent[0]?.text ?? '', turnId: 'go-turn' } as never)
     await $.prompt.submit({ text: 'typed later', wait: false, origin: { kind: 'composer' } })
 
     expect(sent[0]?.text).toContain('I closed 0.1 "side" in the pane')
@@ -516,5 +521,116 @@ describe('review fixes', () => {
     const ran = await $.tool.call({ tool: TOOL, op: 'complete', id: '0.1' })
 
     expect(ran.deny).toContain('unknown op')
+  })
+})
+
+describe('full review fixes', () => {
+  const seed = [
+    { op: 'push', id: '0', title: 'root' },
+    { op: 'add', id: '0.1', title: 'side' },
+    { op: 'add', id: '0.3', title: 'other' },
+    { op: 'push', id: '0.2', title: 'working' },
+  ]
+  const PANE = { plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' } as const
+
+  test('#1 a failing usage read at start still registers the tool and the command', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    on('session.start', (_$, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ deny: 'no figures yet' }))
+    const registered: string[] = []
+    on('tool.register', (_$, e) => {
+      registered.push(`tool:${e.name}`)
+
+      return { value: { tool: TOOL } }
+    })
+    on('command.register', (_$, e) => {
+      registered.push(`command:${e.name}`)
+
+      return { value: { command: 'trail' } }
+    })
+    await $.session.start({ cwd: CWD, surface: null, isInteractive: true })
+
+    expect(registered).toEqual(['tool:stack', 'command:trail'])
+  })
+
+  test('#2 re-adding an existing entry keeps its state unless a state is given', () => {
+    let nodes: StackNode[] = []
+    nodes = applyOp(nodes, { op: 'push', id: '1', title: 'plan' }, 0)
+    nodes = applyOp(nodes, { op: 'push', id: '1.1', title: 'first' }, 1)
+    nodes = applyOp(nodes, { op: 'add', id: '1.2', title: 'second', state: 'done' }, 2)
+    nodes = applyOp(nodes, { op: 'add', id: '1.1', title: 'first, renamed' }, 3)
+    nodes = applyOp(nodes, { op: 'add', id: '1.2', title: 'second' }, 4)
+
+    expect(states(nodes)).toEqual({ '1': 'suspended', '1.1': 'active', '1.2': 'done' })
+    expect(nodes.find(n => n.id === '1.1')?.title).toBe('first, renamed')
+  })
+
+  test('#3 a prompt typed over a running turn leaves the pick and the turn alone', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    let seen: readonly string[] = []
+    on('prompt.submit', (_$, e) => {
+      seen = e.context ?? []
+
+      return { text: e.text, context: e.context }
+    })
+    await $.tool.call({ tool: TOOL, ops: seed })
+    await $.ui.mount(PANE)
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
+    await $.prompt.submit({ text: 'mid-turn', wait: false, origin: { kind: 'composer' }, turnId: 't1' } as never)
+    const mid = await $.tool.call({ tool: TOOL, op: 'add', id: '0.9', title: 'x' })
+
+    expect(seen.join('\n')).not.toContain('focus moved')
+    expect(String(mid.result)).toContain('▶ 0.2  working  [active]')
+
+    await $.prompt.submit({ text: 'idle', wait: false, origin: { kind: 'composer' } })
+    expect(seen.join('\n')).toContain('focus moved to 0.1')
+  })
+
+  test('#4 #5 Go switches when its own turn starts, and resets the turn bookkeeping then', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    const sent: string[] = []
+    on('prompt.submit', (_$, e) => {
+      sent.push(e.text)
+
+      return { text: e.text, context: e.context }
+    })
+    on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_$, e) => ({ text: e.answer }))
+    await $.tool.call({ tool: TOOL, ops: seed })
+    await $.ui.mount(PANE)
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.3' })
+    await $.ui.press({ plugin: 'trailback', key: 'go' })
+    const before = await $.tool.call({ tool: TOOL, op: 'add', id: '0.9', title: 'x' })
+    expect(String(before.result)).toContain('▶ 0.2  working  [active]')
+
+    await $.turn.start({ text: sent[0] ?? '', turnId: 'go-turn' } as never)
+    const after = await $.tool.call({ tool: TOOL, op: 'add', id: '0.9', title: 'x' })
+    expect(String(after.result)).toContain('▶ 0.3  other  [active]')
+  })
+
+  test('#6 a model reset drops queued Done notes even when an id is reused', async ($, on) => {
+    on('session.cwd', () => ({ value: CWD }))
+    mock.clock(on, { now: 1_000 })
+    let seen: readonly string[] = []
+    on('prompt.submit', (_$, e) => {
+      seen = e.context ?? []
+
+      return { text: e.text, context: e.context }
+    })
+    await $.tool.call({ tool: TOOL, ops: seed })
+    await $.ui.mount(PANE)
+    await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
+    await $.ui.press({ plugin: 'trailback', key: 'done' })
+    await $.tool.call({ tool: TOOL, ops: [{ op: 'reset' }, { op: 'push', id: '0', title: 'new plan' }, { op: 'add', id: '0.1', title: 'new side' }] })
+    await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+
+    expect(seen.join('\n')).not.toContain('marked 0.1')
+  })
+
+  test('#8 token counts just under a million read as 1M', () => {
+    expect(shortTokens(999_950)).toBe('1M')
+    expect(shortTokens(999_949)).toBe('999.9k')
   })
 })

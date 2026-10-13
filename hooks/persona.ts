@@ -47,11 +47,15 @@ export function closedSentence(closed: readonly { id: string; title: string }[])
 }
 
 /** Told to Claude on the next prompt after the user closes an entry from the pane. */
-export function doneNote(node: { id: string; title: string }, closing: number): string {
+export function doneNote({ id, title, closing }: { id: string; title: string; closing: number }): string {
+  const node = { id, title }
   const under = closing > 0 ? `, with ${closing} open ${closing === 1 ? 'item' : 'items'} under it` : ''
 
   return `TrailBack: the user marked ${node.id} "${node.title}" done in the pane${under}. Treat it as finished; do not reopen it unless they ask.`
 }
+
+/** The reminder as Go's prompt carries it, since that prompt skips the hook that adds the hidden one. */
+export const GO_REMINDER = 'Also, the TrailBack tree looks behind: bring it up to date.'
 
 export const REMINDER = 'TrailBack: the stack was not updated last turn. If the topic moved, call the `stack` tool now to bring the tree in line.'
 
