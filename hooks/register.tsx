@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
 import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, jumpNote } from './persona'
-import { addTurn, bar, levelColor, resetLabel, rollup, shortTokens } from './usage'
+import { addTurn, bar, levelColor, rollup, shortTokens } from './usage'
 import {
   BADGE,
   COLOR,
@@ -365,7 +365,6 @@ export const register: Register = on => {
       ])
     const isRich = palette === 'rich'
     const blink = isBlinkOn(now, motion)
-    const width = Math.max(20, (e.viewport?.columns ?? 60) - 2)
     const done = nodes.filter(n => n.state === 'done').length
 
     // Line 1: the mode switch, its explainer toggle, and progress at the right.
@@ -379,7 +378,7 @@ export const register: Register = on => {
             {isArjunOn ? '  ● on' : '  ○ off'}
           </Text>
           <Text dimColor>{isArjunOn ? ' · step by step  ' : ' · one-shot answers  '}</Text>
-          <Button key="info" hotkey="i" plain dimColor={!isInfoShown} onPress={() => toggleInfo($)}>
+          <Button key="info" plain dimColor={!isInfoShown} onPress={() => toggleInfo($)}>
             ⓘ
           </Button>
         </Box>
@@ -401,32 +400,40 @@ export const register: Register = on => {
       </Box>
     )
 
-    // Line 2: quota, plain numbers that colour as they climb; bars only past 80%.
-    const quotaParts = [
-      ...usage.windows.map(w => ({ label: WINDOW_LABEL[w.kind] ?? w.kind, percent: w.percentUsed, resetsAt: w.resetsAt })),
-      ...(usage.contextPercent === undefined ? [] : [{ label: 'ctx', percent: usage.contextPercent, resetsAt: undefined }]),
-    ]
-    const quota = quotaParts.length > 0 && (
+    // Line 2: the quota windows as bars, then the context fill.
+    const hasQuota = usage.windows.length > 0 || usage.contextPercent !== undefined
+    const quota = hasQuota && (
       <Box marginTop={1}>
         <Text wrap="truncate-end">
-          {quotaParts.map(q => (
+          {usage.windows.map(w => (
             <Text>
-              <Text dimColor>{q.label} </Text>
-              {q.percent >= 80 && <Text color={levelColor(q.percent)}>{bar(q.percent, 6)} </Text>}
-              <Text color={q.percent < 50 ? undefined : levelColor(q.percent)} bold={q.percent >= 50}>
-                {Math.round(q.percent)}%
+              <Text dimColor>{WINDOW_LABEL[w.kind] ?? w.kind} </Text>
+              <Text color={levelColor(w.percentUsed)}>{bar(w.percentUsed, 8)}</Text>
+              <Text color={levelColor(w.percentUsed)} bold>
+                {' '}
+                {Math.round(w.percentUsed)}%
               </Text>
-              <Text dimColor>
-                {q.resetsAt ? ` ↻${resetLabel(q.resetsAt, now)}` : ''}
-                {'    '}
-              </Text>
+              <Text>{'   '}</Text>
             </Text>
           ))}
+          {usage.contextPercent !== undefined && (
+            <Text>
+              <Text dimColor>ctx </Text>
+              <Text color={levelColor(usage.contextPercent)} bold>
+                {Math.round(usage.contextPercent)}%
+              </Text>
+            </Text>
+          )}
         </Text>
       </Box>
     )
 
-    const rule = <Text dimColor>{'─'.repeat(width)}</Text>
+    // A rule as wide as the pane: a long line clipped to one row, so it follows every resize.
+    const rule = (
+      <Box height={1} overflow="hidden">
+        <Text dimColor>{'─'.repeat(400)}</Text>
+      </Box>
+    )
 
     const footer = isHelpShown ? (
       <Box flexDirection="column">
@@ -439,13 +446,13 @@ export const register: Register = on => {
           ))}
         </Text>
         <Text dimColor wrap="truncate-end">
-          › pick next · g go · a Arjun Mode · i about · h hide (focus the pane: ctrl+x tab)
+          › pick next · g go · a Arjun Mode · ⓘ about · h hide (focus the pane: ctrl+x tab)
         </Text>
       </Box>
     ) : (
       <Box flexDirection="row" justifyContent="flex-end">
         <Button key="help" hotkey="h" plain dimColor onPress={() => toggleHelp($)}>
-          h help
+          help
         </Button>
       </Box>
     )

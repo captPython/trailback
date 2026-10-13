@@ -2,9 +2,6 @@
 
 import type { StackNode } from '../types'
 
-const DAY_MS = 24 * 60 * 60 * 1000
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
 /** A bar of `width` cells, `▓` for the used share. */
 export function bar(percent: number, width: number): string {
   const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)))
@@ -15,17 +12,6 @@ export function bar(percent: number, width: number): string {
 /** Green below half, amber to 80%, red past it. */
 export function levelColor(percent: number): string {
   return percent < 50 ? 'success' : percent < 80 ? 'warning' : 'error'
-}
-
-/** When a window resets: a clock time within a day, a weekday after. */
-export function resetLabel(iso: string, now: number): string {
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return ''
-  if (at.getTime() - now < DAY_MS) {
-    return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
-  }
-
-  return WEEKDAYS[at.getDay()] ?? ''
 }
 
 export function shortTokens(n: number): string {

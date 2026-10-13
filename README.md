@@ -8,18 +8,18 @@ wanders into side questions always shows the way back.
 ```
  [ Arjun Mode ]  ● on · step by step  ⓘ                3/7 ✓
 
- 5h 62% ↻14:30    7d 21% ↻Fri    ctx 48%
+ 5h ▓▓▓▓▓░░░ 62%   7d ▓▓░░░░░░ 21%   ctx 48%
  ──────────────────────────────────────────────────────────
   ◐ 0  build stack-tree mod
 › ├─ ✓ 0.1  visual spec
   ├─ ◐ 0.3  ScreenCut release                        PAUSED
 › │  └─ ○ 0.3.2  README review
   └─ ◐ 0.8  publish TrailBack
-     ├─ ▶ 0.8.2  implement · 3 turns · 4.1k out      ACTIVE
+     ├─ ⠹ 0.8.2  implement · 3 turns · 4.1k out      ACTIVE
 ›    ├─ ◎ 0.8.3  confirm repo name                FOLLOW-UP
 ›    └─ ✕ 0.8.4  token scope                        BLOCKED
 
-                                                    h help
+                                                   h: help
 ```
 
 Claude keeps the stack up to date itself, through a `stack` tool the mod gives it: a new step or a
@@ -46,7 +46,7 @@ The pane is placed beside the conversation; on a narrow terminal it waits until 
 
 | Mark | State | Colour | Meaning |
 |---|---|---|---|
-| `▶` | Active | green, blinks | What Claude is working on now |
+| `⠋⠙⠹…` | Active | green, spins; badge blinks | What Claude is working on now |
 | `◐` | Suspended | orange | Waiting for its children to finish, or paused by you (`PAUSED`) |
 | `◌○◎●` | Follow-up | blue, pulses | Claude handed you a step and waits for your answer |
 | `✕` | Blocked | red, blinks | Waiting on a permission, a decision or an error |
@@ -79,15 +79,15 @@ TrailBack ships with Arjun Mode, a working style for long technical sessions:
 - a short Verification & Confidence block at the end of every reply
 
 Arjun Mode is on when you install. The **[ Arjun Mode ]** button at the top of the pane (or `a` while the
-pane has focus) switches it off and on at any time, from the next reply on; `ⓘ` (or `i`) shows a
-three-line summary of what it does. Off, Claude answers each request in
+pane has focus) switches it off and on at any time, from the next reply on; `ⓘ` shows a three-line
+summary of what it does. Off, Claude answers each request in
 full in one go; the tree keeps working either way. Your choice is remembered across sessions.
 
 ## Usage and quota
 
-The second line shows your 5-hour and weekly windows (percent used and when each resets) and how full
-the context window is, the same figures as Claude Code's status line. A figure turns amber from 50% and
-red from 80%, where a short bar appears beside it; a toast warns once when a window passes 90%. The
+The second line shows your 5-hour and weekly windows as bars and how full the context window is, the
+same figures as Claude Code's status line. Each turns amber from 50% and red from 80%; a toast warns
+once when a window passes 90%. A rule as wide as the pane separates the header from the tree. The
 windows appear on a Claude subscription once the first reply has reported them.
 
 The active entry shows the turns spent on it and their output tokens, its children included.
@@ -95,7 +95,7 @@ The active entry shows the turns spent on it and their output tokens, its childr
 
 ## Legend and keys
 
-`h help` at the bottom right (or `h`) shows the marks and the pane's keys; press it again to hide them.
+`help` at the bottom right (or `h`) shows the marks and the pane's keys; press it again to hide them.
 
 ## Across sessions
 

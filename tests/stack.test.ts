@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { COLOR, applyOp, buildRows, depthColor, glyph, pathToActive, renderText } from '../hooks/stack'
 import type { StackNode } from '../types'
-import { addTurn, bar, levelColor, resetLabel, rollup, shortTokens } from '../hooks/usage'
+import { addTurn, bar, levelColor, rollup, shortTokens } from '../hooks/usage'
 
 const TOOL = 'mcp__trailback__stack'
 const CWD = '/work/project'
@@ -68,9 +68,9 @@ describe('buildRows', () => {
 })
 
 describe('glyph', () => {
-  test('active blinks a green triangle, follow-up pulses, done is still', () => {
-    expect(glyph('active', 0, 0, true)).toBe('▶')
-    expect(glyph('active', 600, 0, true)).toBe('▷')
+  test('active spins, follow-up pulses, done is still', () => {
+    expect(glyph('active', 0, 0, true)).toBe('⠋')
+    expect(glyph('active', 100, 0, true)).toBe('⠙')
     expect(glyph('followup', 0, 0, true)).not.toBe(glyph('followup', 180, 0, true))
     expect(glyph('done', 5000, 0, true)).toBe('✓')
   })
@@ -307,12 +307,6 @@ describe('usage', () => {
   test('quota bars fill by percent and colour by level', () => {
     expect(bar(62, 8)).toBe('▓▓▓▓▓░░░')
     expect([levelColor(42), levelColor(65), levelColor(85)]).toEqual(['success', 'warning', 'error'])
-  })
-
-  test('a reset within a day reads as a time, a later one as a weekday', () => {
-    const now = Date.UTC(2026, 9, 13, 10, 0)
-    expect(resetLabel(new Date(Date.UTC(2026, 9, 13, 14, 30)).toISOString(), now)).toMatch(/^\d\d:\d\d$/)
-    expect(resetLabel(new Date(Date.UTC(2026, 9, 16, 9, 0)).toISOString(), now)).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/)
   })
 
   test('turns and output tokens land on the active entry and roll up to its parents', () => {

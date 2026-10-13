@@ -57,9 +57,11 @@ export const STILL: Record<StackState, string> = {
   done: '✓',
 }
 
+const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const PULSE = ['◌', '○', '◎', '●', '◎', '○']
 const SETTLE = ['▶', '▷', '✓']
 
+const SPIN_MS = 100
 const PULSE_MS = 180
 const BLINK_MS = 600
 const SETTLE_MS = 100
@@ -239,12 +241,12 @@ export function buildRows(nodes: readonly StackNode[]): Row[] {
   return rows
 }
 
-/** The state's mark at `now`: blinking, pulsing or settling while motion is on. */
+/** The state's mark at `now`: spinning, pulsing or settling while motion is on. */
 export function glyph(state: StackState, now: number, changedAt: number, isMoving: boolean): string {
   if (!isMoving) return STILL[state]
   switch (state) {
     case 'active':
-      return Math.floor(now / BLINK_MS) % 2 === 0 ? STILL.active : '▷'
+      return SPIN[Math.floor(now / SPIN_MS) % SPIN.length] ?? STILL.active
     case 'followup':
       return PULSE[Math.floor(now / PULSE_MS) % PULSE.length] ?? STILL.followup
     case 'done':
