@@ -10,6 +10,7 @@ export type StackOp =
   | { op: 'status'; id: string; state: StackState; title?: string }
   | { op: 'focus'; id: string }
   | { op: 'jump'; id: string }
+  | { op: 'complete'; id: string }
   | { op: 'remove'; id: string }
   | { op: 'reset' }
 
@@ -189,6 +190,18 @@ export function applyOp(nodes: readonly StackNode[], op: StackOp, now: number): 
 
       return titled.map(n => (n.id === id ? withState(n, op.state, now) : n))
     }
+    case 'complete': {
+      // The user closing a side entry by hand: it and its open children are done,
+      // and the focus stays where it is, so the active entry and its parents refuse.
+      const id = checkId(op.id)
+      need(list, id)
+      const active = list.find(n => n.state === 'active')
+      if (active && (active.id === id || isAncestor(id, active.id))) {
+        throw new Error(`${id} is active or above the active entry; finish it in the conversation`)
+      }
+
+      return list.map(n => (n.id === id || isAncestor(id, n.id) ? withState(n, 'done', now) : n))
+    }
     case 'remove': {
       const id = checkId(op.id)
 
@@ -205,6 +218,11 @@ export type Guide = { text: string; depth: number }
 export type Row = { node: StackNode; depth: number; prefix: string; guides: Guide[]; isOnPath: boolean }
 
 /** The ids from the root down to the active node; empty when nothing is active. */
+/** How many entries under `id` are still open: what completing it would also close. */
+export function openBelow(nodes: readonly StackNode[], id: string): number {
+  return nodes.filter(n => isAncestor(id, n.id) && n.state !== 'done').length
+}
+
 export function pathToActive(nodes: readonly StackNode[]): string[] {
   const active = nodes.find(n => n.state === 'active')
   if (!active) return []

@@ -59,15 +59,18 @@ Colours come from your Claude Code theme, so they follow light and dark themes.
 ## Pick what to work on next
 
 Every open entry has a `›` in the left margin. Press it (click it, or focus the pane with `ctrl+x tab`
-and press Enter on it) and it turns into `➜ NEXT`, while the current entry shows `→ PAUSE`. Press it
-again to cancel.
+and press Enter on it) and it turns into `➜`, with its buttons on the right, while the current entry
+shows `→ PAUSE`. Press it again to cancel.
 
 Then either:
 
 - press **[ Go ➜ ]** on that row (or `g`): the picked entry becomes active, the old one
   is paused (orange, `PAUSED`) rather than dropped, and TrailBack sends a prompt asking Claude to catch
   you up in 1 to 3 lines and list the action items you still owe on it before carrying on; or
-- just type your next prompt: the same switch happens before Claude reads it, and Claude is told.
+- press **[ ✓ Done ]** (or `d`) to close it yourself, with any open entries under it; the button counts
+  them (`✓ Done +2`). The focus stays where it is, and Claude is told on your next prompt. The active
+  entry and the entries above it have no Done button: those finish in the conversation; or
+- just type your next prompt: the same switch as Go happens before Claude reads it, and Claude is told.
 
 ## Arjun Mode: one step at a time
 

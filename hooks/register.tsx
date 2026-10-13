@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
-import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, jumpNote } from './persona'
+import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, doneNote, jumpNote } from './persona'
 import { addTurn, bar, levelColor, rollup, shortTokens } from './usage'
 import {
   BADGE,
@@ -17,6 +17,7 @@ import {
   isAnimating,
   isBlinkOn,
   isFlashing,
+  openBelow,
   pathToActive,
   renderText,
 } from './stack'
@@ -38,12 +39,13 @@ const reminderAtom = atom({ plugin: 'trailback', key: 'isReminderDue' } as const
 const usageShownAtom = atom({ plugin: 'trailback', key: 'isUsageShown' } as const, false)
 const infoAtom = atom({ plugin: 'trailback', key: 'isInfoShown' } as const, false)
 const helpAtom = atom({ plugin: 'trailback', key: 'isHelpShown' } as const, false)
+const pendingAtom = atom({ plugin: 'trailback', key: 'pendingNotes' } as const, [] as string[])
 const usageAtom = atom({ plugin: 'trailback', key: 'usage' } as const, { windows: [] } as UsageSnapshot)
 
 const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
 const WARN_AT = 90
 
-const OPS = ['push', 'add', 'pop', 'status', 'focus', 'jump', 'remove', 'reset']
+const OPS = ['push', 'add', 'pop', 'status', 'focus', 'jump', 'complete', 'remove', 'reset']
 
 const TOOL_SCHEMA = {
   type: 'object',
@@ -197,6 +199,34 @@ async function toggleHelp($: EngineInterface) {
   await update($, helpAtom, isShown => !isShown)
 }
 
+/** Done: close the picked entry and its open children by hand; Claude hears of it on the next prompt. */
+async function completePicked($: EngineInterface) {
+  const [nodes, nextId] = await Promise.all([read($, nodesAtom), read($, nextAtom)])
+  const node = nodes.find(n => n.id === nextId)
+  if (!node) return
+  const closing = openBelow(nodes, node.id)
+  const now = await $.clock.now()
+  let failure: string | undefined
+  await update($, nodesAtom, list => {
+    failure = undefined
+    try {
+      return applyOp(list, { op: 'complete', id: node.id }, now)
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err)
+
+      return list
+    }
+  })
+  if (failure) {
+    $.ui.toast(`TrailBack: ${failure}`)
+
+    return
+  }
+  await update($, nextAtom, () => '')
+  await update($, pendingAtom, list => [...list, doneNote(node, closing)])
+  await refresh($)
+}
+
 async function pick($: EngineInterface, id: string) {
   await update($, nextAtom, current => (current === id ? '' : id))
   await refresh($)
@@ -251,6 +281,11 @@ export const register: Register = on => {
       }
       await update($, nextAtom, () => '')
       await refresh($)
+    }
+    const pending = await read($, pendingAtom)
+    if (pending.length > 0) {
+      notes.push(...pending)
+      await update($, pendingAtom, () => [])
     }
     if (await read($, reminderAtom)) {
       notes.push(REMINDER)
@@ -562,6 +597,13 @@ export const register: Register = on => {
                   <Button key="go" hotkey="g" variant="primary" onPress={() => go($)}>
                     Go ➜
                   </Button>
+                  {!isOnPath && (
+                    <Box marginLeft={1}>
+                      <Button key="done" hotkey="d" onPress={() => completePicked($)}>
+                        {openBelow(nodes, node.id) > 0 ? `✓ Done +${openBelow(nodes, node.id)}` : '✓ Done'}
+                      </Button>
+                    </Box>
+                  )}
                 </Box>
               ) : (
                 badge && (

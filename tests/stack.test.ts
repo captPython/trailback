@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { COLOR, applyOp, buildRows, depthColor, glyph, pathToActive, renderText } from '../hooks/stack'
+import { COLOR, applyOp, buildRows, depthColor, glyph, openBelow, pathToActive, renderText } from '../hooks/stack'
 import type { StackNode } from '../types'
 import { addTurn, bar, levelColor, rollup, shortTokens } from '../hooks/usage'
 
@@ -386,4 +386,58 @@ test('the active row animates: the spinner turns and the badge blinks as time pa
   expect(frame(first)).toBeDefined()
   expect(frame(second)).not.toBe(frame(first))
   expect(third.includes('"backgroundColor":"success"')).not.toBe(second.includes('"backgroundColor":"success"'))
+})
+
+describe('completing from the pane', () => {
+  function tree(): StackNode[] {
+    let nodes: StackNode[] = []
+    nodes = applyOp(nodes, { op: 'push', id: '0', title: 'root' }, 0)
+    nodes = applyOp(nodes, { op: 'add', id: '0.1', title: 'side' }, 1)
+    nodes = applyOp(nodes, { op: 'add', id: '0.1.1', title: 'side child', state: 'followup' }, 2)
+    nodes = applyOp(nodes, { op: 'add', id: '0.1.2', title: 'side done', state: 'done' }, 3)
+    nodes = applyOp(nodes, { op: 'push', id: '0.2', title: 'working' }, 4)
+
+    return nodes
+  }
+
+  test('closes the entry and its open children, and leaves the focus alone', () => {
+    const nodes = applyOp(tree(), { op: 'complete', id: '0.1' }, 5)
+
+    expect(states(nodes)).toEqual({ '0': 'suspended', '0.1': 'done', '0.1.1': 'done', '0.1.2': 'done', '0.2': 'active' })
+    expect(openBelow(tree(), '0.1')).toBe(1)
+  })
+
+  test('refuses the active entry and the entries above it', () => {
+    expect(() => applyOp(tree(), { op: 'complete', id: '0.2' }, 5)).toThrow('active')
+    expect(() => applyOp(tree(), { op: 'complete', id: '0' }, 5)).toThrow('active')
+  })
+})
+
+test('Done in the pane closes the picked entry and tells Claude on the next prompt', async ($, on) => {
+  on('session.cwd', () => ({ value: CWD }))
+  mock.clock(on, { now: 1_000 })
+  let seen: readonly string[] = []
+  on('prompt.submit', (_$, e) => {
+    seen = e.context ?? []
+
+    return { text: e.text, context: e.context }
+  })
+  await $.tool.call({
+    tool: TOOL,
+    ops: [
+      { op: 'push', id: '0', title: 'root' },
+      { op: 'add', id: '0.1', title: 'side' },
+      { op: 'add', id: '0.1.1', title: 'side child' },
+      { op: 'push', id: '0.2', title: 'working' },
+    ],
+  })
+  await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
+  await $.ui.press({ plugin: 'trailback', key: 'pick:0.1' })
+  await $.ui.press({ plugin: 'trailback', key: 'done' })
+  await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+
+  expect(seen.join('\n')).toContain('marked 0.1 "side" done in the pane, with 1 open item under it')
+  const after = await $.tool.call({ tool: TOOL, op: 'add', id: '0.3', title: 'x' })
+  expect(String(after.result)).toContain('✓ 0.1  side  [done]')
+  expect(String(after.result)).toContain('▶ 0.2  working  [active]')
 })
