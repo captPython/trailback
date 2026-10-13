@@ -5,22 +5,7 @@
 A Claude Code mod that draws your conversation's context stack as a live tree, so a session that
 wanders into side questions always shows the way back.
 
-```
- [ Arjun Mode ]  ● on · step by step  ⓘ                3/7 ✓
-
- 5h ▓▓▓▓▓░░░ 62%   7d ▓▓░░░░░░ 21%   ctx 48%
- ──────────────────────────────────────────────────────────
-  ◐ 0  build stack-tree mod
-› ├─ ✓ 0.1  visual spec
-  ├─ ◐ 0.3  ScreenCut release                        PAUSED
-› │  └─ ○ 0.3.2  README review
-  └─ ◐ 0.8  publish TrailBack
-     ├─ ⠹ 0.8.2  implement · 3 turns · 4.1k out      ACTIVE
-›    ├─ ◎ 0.8.3  confirm repo name                FOLLOW-UP
-›    └─ ✕ 0.8.4  token scope                        BLOCKED
-
-                                                   h: help
-```
+<img width="1157" height="839" alt="image" src="https://github.com/user-attachments/assets/00c93073-40ae-469e-809c-4d1a670be2a2" />
 
 Claude keeps the stack up to date itself, through a `stack` tool the mod gives it: a new step or a
 nested question is pushed, a resolved one is popped and focus returns to its parent.
