@@ -37,6 +37,9 @@ declare module 'claude-code' {
       isTouched: boolean
       /** Whether the next prompt carries a reminder to update the stack. */
       isReminderDue: boolean
+      /** Whether the pane shows the three-line explainer of Arjun Mode, and the legend and keys. */
+      isInfoShown: boolean
+      isHelpShown: boolean
       /** Whether every row shows its turns and output tokens, not only the active one. */
       isUsageShown: boolean
       usage: UsageSnapshot

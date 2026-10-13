@@ -6,10 +6,10 @@ A Claude Code mod that draws your conversation's context stack as a live tree, s
 wanders into side questions always shows the way back.
 
 ```
- 5h ▓▓▓▓▓░░░ 62% ↻14:30   7d ▓▓░░░░░░ 21% ↻Fri   ctx 48%   $3.80
- [ Arjun ] on  step by step
-  ▶ 1    ◎ 1    ✕ 1     3/7 done
+ [ Arjun Mode ]  ● on · step by step  ⓘ                3/7 ✓
 
+ 5h 62% ↻14:30    7d 21% ↻Fri    ctx 48%
+ ──────────────────────────────────────────────────────────
   ◐ 0  build stack-tree mod
 › ├─ ✓ 0.1  visual spec
   ├─ ◐ 0.3  ScreenCut release                        PAUSED
@@ -18,6 +18,8 @@ wanders into side questions always shows the way back.
      ├─ ▶ 0.8.2  implement · 3 turns · 4.1k out      ACTIVE
 ›    ├─ ◎ 0.8.3  confirm repo name                FOLLOW-UP
 ›    └─ ✕ 0.8.4  token scope                        BLOCKED
+
+                                                    h help
 ```
 
 Claude keeps the stack up to date itself, through a `stack` tool the mod gives it: a new step or a
@@ -62,33 +64,38 @@ again to cancel.
 
 Then either:
 
-- press **[ Go ➜ id ]** at the top of the pane (or `g`): the picked entry becomes active, the old one
+- press **[ Go ➜ ]** on that row (or `g`): the picked entry becomes active, the old one
   is paused (orange, `PAUSED`) rather than dropped, and TrailBack sends a prompt asking Claude to catch
   you up in 1 to 3 lines and list the action items you still owe on it before carrying on; or
 - just type your next prompt: the same switch happens before Claude reads it, and Claude is told.
 
-## Arjun: step-by-step mode
+## Arjun Mode: one step at a time
 
-TrailBack ships with Arjun, a working style for long technical sessions:
+TrailBack ships with Arjun Mode, a working style for long technical sessions:
 
 - one actionable step per reply, then wait for you
 - nested questions handled last-in, first-out, with the active level named in each reply
 - targeted questions instead of guesses when something is ambiguous
 - a short Verification & Confidence block at the end of every reply
 
-Arjun is on when you install. The **[ Arjun ]** button at the top of the pane (or `a` while the pane has
-focus) switches it off and on at any time, from the next reply on. Off, Claude answers each request in
+Arjun Mode is on when you install. The **[ Arjun Mode ]** button at the top of the pane (or `a` while the
+pane has focus) switches it off and on at any time, from the next reply on; `ⓘ` (or `i`) shows a
+three-line summary of what it does. Off, Claude answers each request in
 full in one go; the tree keeps working either way. Your choice is remembered across sessions.
 
 ## Usage and quota
 
-The top line shows your 5-hour and weekly windows (percent used and when each resets), how full the
-context window is, and the session's cost, the same figures as Claude Code's status line. Bars are
-green below 50%, amber to 80% and red beyond; a toast warns once when a window passes 90%. The
+The second line shows your 5-hour and weekly windows (percent used and when each resets) and how full
+the context window is, the same figures as Claude Code's status line. A figure turns amber from 50% and
+red from 80%, where a short bar appears beside it; a toast warns once when a window passes 90%. The
 windows appear on a Claude subscription once the first reply has reported them.
 
 The active entry shows the turns spent on it and their output tokens, its children included.
 `/trail usage on` shows that on every row.
+
+## Legend and keys
+
+`h help` at the bottom right (or `h`) shows the marks and the pane's keys; press it again to hide them.
 
 ## Across sessions
 

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
-import { ARJUN, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, jumpNote } from './persona'
+import { ARJUN, ARJUN_ABOUT, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, jumpNote } from './persona'
 import { addTurn, bar, levelColor, resetLabel, rollup, shortTokens } from './usage'
 import {
   BADGE,
@@ -36,6 +36,8 @@ const nextAtom = atom({ plugin: 'trailback', key: 'nextId' } as const, '')
 const touchedAtom = atom({ plugin: 'trailback', key: 'isTouched' } as const, false)
 const reminderAtom = atom({ plugin: 'trailback', key: 'isReminderDue' } as const, false)
 const usageShownAtom = atom({ plugin: 'trailback', key: 'isUsageShown' } as const, false)
+const infoAtom = atom({ plugin: 'trailback', key: 'isInfoShown' } as const, false)
+const helpAtom = atom({ plugin: 'trailback', key: 'isHelpShown' } as const, false)
 const usageAtom = atom({ plugin: 'trailback', key: 'usage' } as const, { windows: [] } as UsageSnapshot)
 
 const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
@@ -185,6 +187,14 @@ async function go($: EngineInterface) {
   await update($, nextAtom, () => '')
   await refresh($)
   await $.prompt.submit({ text: briefPrompt(to), asUser: true })
+}
+
+async function toggleInfo($: EngineInterface) {
+  await update($, infoAtom, isShown => !isShown)
+}
+
+async function toggleHelp($: EngineInterface) {
+  await update($, helpAtom, isShown => !isShown)
 }
 
 async function pick($: EngineInterface, id: string) {
@@ -340,122 +350,139 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
-    const [nodes, motion, palette, isArjunOn, nextId, usage, isUsageShown, now] = await Promise.all([
-      read($, nodesAtom),
-      read($, motionAtom),
-      read($, paletteAtom),
-      read($, arjunAtom),
-      read($, nextAtom),
-      read($, usageAtom),
-      read($, usageShownAtom),
-      $.clock.now(),
-    ])
+    const [nodes, motion, palette, isArjunOn, nextId, usage, isUsageShown, isInfoShown, isHelpShown, now] =
+      await Promise.all([
+        read($, nodesAtom),
+        read($, motionAtom),
+        read($, paletteAtom),
+        read($, arjunAtom),
+        read($, nextAtom),
+        read($, usageAtom),
+        read($, usageShownAtom),
+        read($, infoAtom),
+        read($, helpAtom),
+        $.clock.now(),
+      ])
     const isRich = palette === 'rich'
     const blink = isBlinkOn(now, motion)
-    const picked = nodes.find(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
+    const width = Math.max(20, (e.viewport?.columns ?? 60) - 2)
+    const done = nodes.filter(n => n.state === 'done').length
 
-    const quota =
-      usage.windows.length > 0 || usage.contextPercent !== undefined || usage.costUsd !== undefined ? (
+    // Line 1: the mode switch, its explainer toggle, and progress at the right.
+    const modeLine = (
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row">
+          <Button key="arjun" hotkey="a" variant={isArjunOn ? 'primary' : 'secondary'} dimColor={!isArjunOn} onPress={() => toggleArjun($)}>
+            Arjun Mode
+          </Button>
+          <Text color={isArjunOn ? 'success' : 'inactive'} bold={isArjunOn}>
+            {isArjunOn ? '  ● on' : '  ○ off'}
+          </Text>
+          <Text dimColor>{isArjunOn ? ' · step by step  ' : ' · one-shot answers  '}</Text>
+          <Button key="info" hotkey="i" plain dimColor={!isInfoShown} onPress={() => toggleInfo($)}>
+            ⓘ
+          </Button>
+        </Box>
+        {nodes.length > 0 && (
+          <Text dimColor>
+            {done}/{nodes.length} ✓
+          </Text>
+        )}
+      </Box>
+    )
+
+    const info = isInfoShown && (
+      <Box flexDirection="column" marginTop={1}>
+        {ARJUN_ABOUT.map(line => (
+          <Text dimColor wrap="wrap">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    )
+
+    // Line 2: quota, plain numbers that colour as they climb; bars only past 80%.
+    const quotaParts = [
+      ...usage.windows.map(w => ({ label: WINDOW_LABEL[w.kind] ?? w.kind, percent: w.percentUsed, resetsAt: w.resetsAt })),
+      ...(usage.contextPercent === undefined ? [] : [{ label: 'ctx', percent: usage.contextPercent, resetsAt: undefined }]),
+    ]
+    const quota = quotaParts.length > 0 && (
+      <Box marginTop={1}>
         <Text wrap="truncate-end">
-          {usage.windows.map(w => (
+          {quotaParts.map(q => (
             <Text>
-              <Text dimColor>{WINDOW_LABEL[w.kind] ?? w.kind} </Text>
-              <Text color={levelColor(w.percentUsed)}>{bar(w.percentUsed, 8)}</Text>
-              <Text color={levelColor(w.percentUsed)} bold>
-                {' '}
-                {Math.round(w.percentUsed)}%
+              <Text dimColor>{q.label} </Text>
+              {q.percent >= 80 && <Text color={levelColor(q.percent)}>{bar(q.percent, 6)} </Text>}
+              <Text color={q.percent < 50 ? undefined : levelColor(q.percent)} bold={q.percent >= 50}>
+                {Math.round(q.percent)}%
               </Text>
               <Text dimColor>
-                {w.resetsAt ? ` ↻${resetLabel(w.resetsAt, now)}` : ''}
-                {'   '}
+                {q.resetsAt ? ` ↻${resetLabel(q.resetsAt, now)}` : ''}
+                {'    '}
               </Text>
             </Text>
           ))}
-          {usage.contextPercent !== undefined && (
-            <Text>
-              <Text dimColor>ctx </Text>
-              <Text color={levelColor(usage.contextPercent)}>{Math.round(usage.contextPercent)}%</Text>
-              <Text>{'   '}</Text>
-            </Text>
-          )}
-          {usage.costUsd !== undefined && <Text dimColor>${usage.costUsd.toFixed(2)}</Text>}
         </Text>
-      ) : undefined
+      </Box>
+    )
 
-    const header = (
-      <Box flexDirection="row">
-        <Button key="arjun" hotkey="a" variant={isArjunOn ? 'primary' : 'secondary'} dimColor={!isArjunOn} onPress={() => toggleArjun($)}>
-          Arjun
-        </Button>
-        <Text color={isArjunOn ? 'success' : 'inactive'} bold={isArjunOn}>
-          {isArjunOn ? ' on  ' : ' off '}
+    const rule = <Text dimColor>{'─'.repeat(width)}</Text>
+
+    const footer = isHelpShown ? (
+      <Box flexDirection="column">
+        <Text wrap="truncate-end">
+          {STATES.map(s => (
+            <Text>
+              <Text color={isRich ? COLOR[s] : undefined}>{STILL[s]}</Text>
+              <Text dimColor> {LABEL[s]}  </Text>
+            </Text>
+          ))}
         </Text>
-        <Text dimColor>{isArjunOn ? 'step by step' : 'one-shot answers'}</Text>
-        {picked && (
-          <Box marginLeft={2}>
-            <Button key="go" hotkey="g" variant="primary" onPress={() => go($)}>
-              {`Go ➜ ${picked.id}`}
-            </Button>
-          </Box>
-        )}
+        <Text dimColor wrap="truncate-end">
+          › pick next · g go · a Arjun Mode · i about · h hide (focus the pane: ctrl+x tab)
+        </Text>
+      </Box>
+    ) : (
+      <Box flexDirection="row" justifyContent="flex-end">
+        <Button key="help" hotkey="h" plain dimColor onPress={() => toggleHelp($)}>
+          h help
+        </Button>
       </Box>
     )
 
     if (nodes.length === 0) {
       return (
         <Box flexDirection="column">
+          {modeLine}
+          {info}
           {quota}
-          {header}
+          {rule}
+          <Text dimColor>No trail yet. Steps appear here as the conversation nests.</Text>
           <Text> </Text>
-          <Text dimColor>No trail yet.</Text>
-          <Text dimColor>Steps appear here as the conversation nests.</Text>
+          {footer}
         </Box>
       )
     }
 
     const rows = buildRows(nodes)
-    const room = Math.max(3, (e.viewport?.rows ?? 24) - 8)
+    const room = Math.max(3, (e.viewport?.rows ?? 24) - (isInfoShown ? 12 : 8))
     const at = Math.max(0, rows.findIndex(r => r.node.state === 'active'))
     const start = rows.length <= room ? 0 : Math.min(Math.max(0, at - Math.floor(room / 2)), rows.length - room)
     const shown = rows.slice(start, start + room)
-    const counts = STATES.filter(s => s !== 'done' && s !== 'suspended')
-      .map(s => [s, nodes.filter(n => n.state === s).length] as const)
-      .filter(([, n]) => n > 0)
-    const done = nodes.filter(n => n.state === 'done').length
     const isPauseDue = nextId !== '' && nodes.some(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
 
     return (
       <Box flexDirection="column">
+        {modeLine}
+        {info}
         {quota}
-        {header}
-        <Text wrap="truncate-end">
-          {counts.map(([s, n]) =>
-            isRich ? (
-              <Text>
-                <Text backgroundColor={COLOR[s]} color="inverseText" bold>
-                  {` ${STILL[s]} ${n} `}
-                </Text>
-                {'  '}
-              </Text>
-            ) : (
-              <Text color={COLOR[s]}>
-                {STILL[s]} {n} {LABEL[s]}
-                {'   '}
-              </Text>
-            ),
-          )}
-          <Text dimColor>
-            {' '}
-            {done}/{nodes.length} done
-          </Text>
-        </Text>
-        <Text> </Text>
+        {rule}
         {start > 0 && <Text dimColor>    ↑ {start} more</Text>}
         {shown.map(({ node, depth, guides, isOnPath }) => {
           const state: StackState = node.state
           const isActive = state === 'active'
           const isBlocked = state === 'blocked'
-          const isPicked = node.id === nextId && !isActive
+          const isPicked = node.id === nextId && !isActive && state !== 'done'
           const isPausing = isActive && isPauseDue
           const isQuiet = state === 'done' || state === 'pending' || (state === 'suspended' && !isRich)
           const isPickable = !isActive && state !== 'done'
@@ -466,15 +493,13 @@ export const register: Register = on => {
             ? undefined
             : isPausing
               ? { text: '→ PAUSE', color: 'claude', isBlinking: true }
-              : isPicked
-                ? { text: 'NEXT', color: 'text', isBlinking: false }
-                : isActive
-                  ? { text: 'ACTIVE', color: COLOR.active, isBlinking: true }
-                  : node.isParked && state === 'suspended'
-                    ? { text: 'PAUSED', color: COLOR.suspended, isBlinking: false }
-                    : BADGE[state]
-                      ? { text: BADGE[state] ?? '', color: COLOR[state], isBlinking: isBlocked }
-                      : undefined
+              : isActive
+                ? { text: 'ACTIVE', color: COLOR.active, isBlinking: true }
+                : node.isParked && state === 'suspended'
+                  ? { text: 'PAUSED', color: COLOR.suspended, isBlinking: false }
+                  : BADGE[state]
+                    ? { text: BADGE[state] ?? '', color: COLOR[state], isBlinking: isBlocked }
+                    : undefined
 
           return (
             <Box flexDirection="row" justifyContent="space-between">
@@ -525,41 +550,33 @@ export const register: Register = on => {
                   )}
                 </Text>
               </Box>
-              {badge && (
+              {isPicked ? (
                 <Box flexShrink={0} marginLeft={1}>
-                  {badge.isBlinking && !blink ? (
-                    <Text color={badge.color} bold>
-                      {` ${badge.text} `}
-                    </Text>
-                  ) : (
-                    <Text backgroundColor={badge.color} color="inverseText" bold>
-                      {` ${badge.text} `}
-                    </Text>
-                  )}
+                  <Button key="go" hotkey="g" variant="primary" onPress={() => go($)}>
+                    Go ➜
+                  </Button>
                 </Box>
+              ) : (
+                badge && (
+                  <Box flexShrink={0} marginLeft={1}>
+                    {badge.isBlinking && !blink ? (
+                      <Text color={badge.color} bold>
+                        {` ${badge.text} `}
+                      </Text>
+                    ) : (
+                      <Text backgroundColor={badge.color} color="inverseText" bold>
+                        {` ${badge.text} `}
+                      </Text>
+                    )}
+                  </Box>
+                )
               )}
             </Box>
           )
         })}
         {start + room < rows.length && <Text dimColor>    ↓ {rows.length - start - room} more</Text>}
         <Text> </Text>
-        <Text wrap="truncate-end">
-          {STATES.map(s => (
-            <Text>
-              <Text color={isRich ? COLOR[s] : undefined} dimColor={!isRich}>
-                {STILL[s]}
-              </Text>
-              <Text dimColor> {LABEL[s]}  </Text>
-            </Text>
-          ))}
-          <Text dimColor>
-            ➜ next{motion ? '' : ' · motion off'}
-            {isRich ? '' : ' · calm'}
-          </Text>
-        </Text>
-        <Text dimColor wrap="truncate-end">
-          › pick next · g go · a Arjun (focus the pane with ctrl+x tab)
-        </Text>
+        {footer}
       </Box>
     )
   })

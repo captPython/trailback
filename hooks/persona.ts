@@ -27,6 +27,13 @@ export const ARJUN = [
   '- Rationale & Citations: what the claims rest on (docs, command output, observed state)',
 ].join('\n')
 
+/** What the pane's ⓘ next to Arjun Mode explains, in three lines. */
+export const ARJUN_ABOUT = [
+  'Arjun Mode: Claude works one step at a time: one action per reply, then it waits for you.',
+  'Side questions are handled last in, first out, and each reply names the active stack level.',
+  'Every reply ends with a confidence rating. Switch it off for complete answers in one go.',
+]
+
 export const ONE_SHOT = [
   'Arjun mode is OFF (the user switched it from the TrailBack pane): answer completely in one response, all steps included,',
   'even where earlier replies in this conversation went one step at a time. Keep updating the TrailBack stack.',
