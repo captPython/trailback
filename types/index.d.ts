@@ -13,7 +13,16 @@ export type StackNode = {
   changedAt: number
   /** Set aside by a jump from the pane; cleared when it is active again. */
   isParked?: boolean
+  /** Turns that ended while this entry was active, and their output tokens. */
+  turns?: number
+  outTokens?: number
 }
+
+/** One rate-limit window as the last response reported it. */
+export type QuotaWindow = { kind: string; percentUsed: number; resetsAt?: string }
+
+/** The figures the pane's top line shows; each absent where the engine has none. */
+export type UsageSnapshot = { windows: QuotaWindow[]; contextPercent?: number; costUsd?: number }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -28,6 +37,9 @@ declare module 'claude-code' {
       isTouched: boolean
       /** Whether the next prompt carries a reminder to update the stack. */
       isReminderDue: boolean
+      /** Whether every row shows its turns and output tokens, not only the active one. */
+      isUsageShown: boolean
+      usage: UsageSnapshot
     }
   }
 }

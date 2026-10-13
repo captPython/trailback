@@ -39,3 +39,14 @@ export function jumpNote(to: { id: string; title: string }, from?: { id: string;
 
   return `TrailBack: the user picked the next topic in the pane, focus moved to ${to.id} "${to.title}"${paused}. Work on ${to.id} now; the tree already shows the change.`
 }
+
+/**
+ * The prompt the pane's Go button sends, in the user's voice: a plugin's own
+ * prompt skips its own prompt.submit hook, so the ask travels in the text.
+ */
+export function briefPrompt(to: { id: string; title: string }): string {
+  return (
+    `Resume ${to.id} "${to.title}": catch me up in 1 to 3 lines on where it stood, ` +
+    'list the action items I still owe on it (or say there are none), then carry on with the next step.'
+  )
+}

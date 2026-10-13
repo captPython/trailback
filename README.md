@@ -6,6 +6,7 @@ A Claude Code mod that draws your conversation's context stack as a live tree, s
 wanders into side questions always shows the way back.
 
 ```
+ 5h ▓▓▓▓▓░░░ 62% ↻14:30   7d ▓▓░░░░░░ 21% ↻Fri   ctx 48%   $3.80
  [ Arjun ] on  step by step
   ▶ 1    ◎ 1    ✕ 1     3/7 done
 
@@ -14,7 +15,7 @@ wanders into side questions always shows the way back.
   ├─ ◐ 0.3  ScreenCut release                        PAUSED
 › │  └─ ○ 0.3.2  README review
   └─ ◐ 0.8  publish TrailBack
-     ├─ ⠹ 0.8.2  implement                           ACTIVE
+     ├─ ▶ 0.8.2  implement · 3 turns · 4.1k out      ACTIVE
 ›    ├─ ◎ 0.8.3  confirm repo name                FOLLOW-UP
 ›    └─ ✕ 0.8.4  token scope                        BLOCKED
 ```
@@ -43,12 +44,12 @@ The pane is placed beside the conversation; on a narrow terminal it waits until 
 
 | Mark | State | Colour | Meaning |
 |---|---|---|---|
-| `⠋⠙⠹…` | Active | green, badge blinks | What Claude is working on now |
+| `▶` | Active | green, blinks | What Claude is working on now |
 | `◐` | Suspended | orange | Waiting for its children to finish, or paused by you (`PAUSED`) |
 | `◌○◎●` | Follow-up | blue, pulses | Claude handed you a step and waits for your answer |
 | `✕` | Blocked | red, blinks | Waiting on a permission, a decision or an error |
 | `○` | Pending | grey | Planned, not started |
-| `✓` | Done | dim green | Resolved |
+| `✓` | Done | dim, struck through | Resolved |
 
 The tree's guide lines take a colour per depth, and the path down to the active entry is drawn in green.
 Colours come from your Claude Code theme, so they follow light and dark themes.
@@ -59,8 +60,12 @@ Every open entry has a `›` in the left margin. Press it (click it, or focus th
 and press Enter on it) and it turns into `➜ NEXT`, while the current entry shows `→ PAUSE`. Press it
 again to cancel.
 
-Your next prompt then switches the focus before Claude reads it: the picked entry becomes active, the
-old one is paused (orange, `PAUSED`) rather than dropped, and Claude is told about the switch.
+Then either:
+
+- press **[ Go ➜ id ]** at the top of the pane (or `g`): the picked entry becomes active, the old one
+  is paused (orange, `PAUSED`) rather than dropped, and TrailBack sends a prompt asking Claude to catch
+  you up in 1 to 3 lines and list the action items you still owe on it before carrying on; or
+- just type your next prompt: the same switch happens before Claude reads it, and Claude is told.
 
 ## Arjun: step-by-step mode
 
@@ -75,6 +80,16 @@ Arjun is on when you install. The **[ Arjun ]** button at the top of the pane (o
 focus) switches it off and on at any time, from the next reply on. Off, Claude answers each request in
 full in one go; the tree keeps working either way. Your choice is remembered across sessions.
 
+## Usage and quota
+
+The top line shows your 5-hour and weekly windows (percent used and when each resets), how full the
+context window is, and the session's cost, the same figures as Claude Code's status line. Bars are
+green below 50%, amber to 80% and red beyond; a toast warns once when a window passes 90%. The
+windows appear on a Claude subscription once the first reply has reported them.
+
+The active entry shows the turns spent on it and their output tokens, its children included.
+`/trail usage on` shows that on every row.
+
 ## Across sessions
 
 The stack is saved per project folder. A new or resumed session in the same folder picks up the trail
@@ -86,6 +101,7 @@ where it was; `/trail reset` clears it for that folder.
 |---|---|
 | `/trail` | Open the pane |
 | `/trail arjun on` / `off` | Switch Arjun without the pane |
+| `/trail usage on` / `off` | Turns and output tokens on every row, or on the active one only |
 | `/trail color rich` / `calm` | Depth colours and badges, or a quieter look |
 | `/trail motion on` / `off` | Spinners and blinking, or still marks |
 | `/trail reset` | Clear the stack for this project |

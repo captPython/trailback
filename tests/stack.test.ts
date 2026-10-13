@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { COLOR, applyOp, buildRows, depthColor, glyph, pathToActive, renderText } from '../hooks/stack'
 import type { StackNode } from '../types'
+import { addTurn, bar, levelColor, resetLabel, rollup, shortTokens } from '../hooks/usage'
 
 const TOOL = 'mcp__trailback__stack'
 const CWD = '/work/project'
@@ -67,14 +68,15 @@ describe('buildRows', () => {
 })
 
 describe('glyph', () => {
-  test('active spins, follow-up pulses, done is still', () => {
-    expect(glyph('active', 0, 0, true)).not.toBe(glyph('active', 100, 0, true))
+  test('active blinks a green triangle, follow-up pulses, done is still', () => {
+    expect(glyph('active', 0, 0, true)).toBe('▶')
+    expect(glyph('active', 600, 0, true)).toBe('▷')
     expect(glyph('followup', 0, 0, true)).not.toBe(glyph('followup', 180, 0, true))
     expect(glyph('done', 5000, 0, true)).toBe('✓')
   })
 
   test('motion off freezes every glyph', () => {
-    expect(glyph('active', 0, 0, false)).toBe(glyph('active', 100, 0, false))
+    expect(glyph('active', 600, 0, false)).toBe('▶')
   })
 })
 
@@ -299,4 +301,62 @@ describe('across sessions', () => {
     const composed = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] })
     expect(composed.sections.map(x => x.id)).toContain('trailback:one-shot')
   })
+})
+
+describe('usage', () => {
+  test('quota bars fill by percent and colour by level', () => {
+    expect(bar(62, 8)).toBe('▓▓▓▓▓░░░')
+    expect([levelColor(42), levelColor(65), levelColor(85)]).toEqual(['success', 'warning', 'error'])
+  })
+
+  test('a reset within a day reads as a time, a later one as a weekday', () => {
+    const now = Date.UTC(2026, 9, 13, 10, 0)
+    expect(resetLabel(new Date(Date.UTC(2026, 9, 13, 14, 30)).toISOString(), now)).toMatch(/^\d\d:\d\d$/)
+    expect(resetLabel(new Date(Date.UTC(2026, 9, 16, 9, 0)).toISOString(), now)).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/)
+  })
+
+  test('turns and output tokens land on the active entry and roll up to its parents', () => {
+    let nodes: StackNode[] = []
+    nodes = applyOp(nodes, { op: 'push', id: '1', title: 'a' }, 0)
+    nodes = addTurn(nodes, 1500)
+    nodes = applyOp(nodes, { op: 'push', id: '1.1', title: 'b' }, 1)
+    nodes = addTurn(nodes, 2600)
+    nodes = addTurn(nodes, 400)
+
+    expect(rollup(nodes, '1.1')).toEqual({ turns: 2, outTokens: 3000 })
+    expect(rollup(nodes, '1')).toEqual({ turns: 3, outTokens: 4500 })
+    expect(shortTokens(4500)).toBe('4.5k')
+  })
+})
+
+test('Go sends a prompt for the picked entry that asks for a brief and the open actions', async ($, on) => {
+  on('session.cwd', () => ({ value: CWD }))
+  mock.clock(on, { now: 1_000 })
+  let sent = ''
+  let seen: readonly string[] = []
+  on('prompt.submit', (_$, e) => {
+    sent = e.text
+    seen = e.context ?? []
+
+    return { text: e.text, context: e.context }
+  })
+  await $.tool.call({
+    tool: TOOL,
+    ops: [
+      { op: 'push', id: '0', title: 'root' },
+      { op: 'push', id: '0.1', title: 'current' },
+      { op: 'add', id: '0.2', title: 'later' },
+    ],
+  })
+  await $.ui.mount({ plugin: 'trailback', surface: 'terminal', component: 'Pane', props: {} as never, requestId: 'trailback' })
+  await $.ui.press({ plugin: 'trailback', key: 'pick:0.2' })
+  await $.ui.press({ plugin: 'trailback', key: 'go' })
+
+  expect(sent).toContain('Resume 0.2 "later"')
+  expect(sent).toContain('1 to 3 lines')
+  expect(sent).toContain('action items')
+  void seen
+  const tree = await $.tool.call({ tool: TOOL, op: 'add', id: '0.3', title: 'x' })
+  expect(String(tree.result)).toContain('▶ 0.2  later  [active]')
+  expect(String(tree.result)).toContain('0.1  current  [paused]')
 })

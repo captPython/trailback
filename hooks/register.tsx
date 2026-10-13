@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { StackNode, StackPalette, StackState } from '../types'
-import { ARJUN, ONE_SHOT, PROTOCOL, REMINDER, jumpNote } from './persona'
+import type { QuotaWindow, StackNode, StackPalette, StackState, UsageSnapshot } from '../types'
+import { ARJUN, ONE_SHOT, PROTOCOL, REMINDER, briefPrompt, jumpNote } from './persona'
+import { addTurn, bar, levelColor, resetLabel, rollup, shortTokens } from './usage'
 import {
   BADGE,
   COLOR,
@@ -34,6 +35,11 @@ const arjunAtom = atom({ plugin: 'trailback', key: 'isArjunOn' } as const, true)
 const nextAtom = atom({ plugin: 'trailback', key: 'nextId' } as const, '')
 const touchedAtom = atom({ plugin: 'trailback', key: 'isTouched' } as const, false)
 const reminderAtom = atom({ plugin: 'trailback', key: 'isReminderDue' } as const, false)
+const usageShownAtom = atom({ plugin: 'trailback', key: 'isUsageShown' } as const, false)
+const usageAtom = atom({ plugin: 'trailback', key: 'usage' } as const, { windows: [] } as UsageSnapshot)
+
+const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
+const WARN_AT = 90
 
 const OPS = ['push', 'add', 'pop', 'status', 'focus', 'jump', 'remove', 'reset']
 
@@ -61,7 +67,7 @@ const TOOL_SCHEMA = {
   },
 }
 
-type Prefs = { isArjunOn?: boolean; palette?: StackPalette; motion?: boolean }
+type Prefs = { isArjunOn?: boolean; palette?: StackPalette; motion?: boolean; isUsageShown?: boolean }
 
 function toOps(input: Record<string, unknown>): StackOp[] {
   const raw: unknown[] = Array.isArray(input.ops) ? input.ops : [input]
@@ -85,6 +91,8 @@ function statusText(nodes: readonly StackNode[], isArjunOn: boolean): string | u
 
 // Module variables start over on a reload; session.start runs again then.
 let ticker: Timer | undefined
+/** Windows already warned about past WARN_AT, so each warns once until it resets. */
+const warned = new Set<string>()
 
 /** One animation frame: redraw, and stop the timer once nothing moves. */
 async function tick($: EngineInterface) {
@@ -109,8 +117,13 @@ async function saveStack($: EngineInterface) {
 }
 
 async function savePrefs($: EngineInterface) {
-  const [isArjunOn, palette, motion] = await Promise.all([read($, arjunAtom), read($, paletteAtom), read($, motionAtom)])
-  await $.store.set(PREFS, { isArjunOn, palette, motion }).catch(() => undefined)
+  const [isArjunOn, palette, motion, isUsageShown] = await Promise.all([
+    read($, arjunAtom),
+    read($, paletteAtom),
+    read($, motionAtom),
+    read($, usageShownAtom),
+  ])
+  await $.store.set(PREFS, { isArjunOn, palette, motion, isUsageShown }).catch(() => undefined)
 }
 
 /** At session start: the saved stack (unless this session already holds one) and the saved choices. */
@@ -119,6 +132,7 @@ async function restore($: EngineInterface) {
   if (typeof prefs.isArjunOn === 'boolean') await update($, arjunAtom, () => prefs.isArjunOn ?? true)
   if (prefs.palette === 'rich' || prefs.palette === 'calm') await update($, paletteAtom, () => prefs.palette ?? 'rich')
   if (typeof prefs.motion === 'boolean') await update($, motionAtom, () => prefs.motion ?? true)
+  if (typeof prefs.isUsageShown === 'boolean') await update($, usageShownAtom, () => prefs.isUsageShown ?? false)
   const key = await stackKey($)
   const saved = (key ? await $.store.get(key).catch(() => undefined) : undefined) as { nodes?: StackNode[] } | undefined
   if (Array.isArray(saved?.nodes) && saved.nodes.length > 0) {
@@ -145,6 +159,34 @@ async function toggleArjun($: EngineInterface) {
   await setArjun($, !(await read($, arjunAtom)))
 }
 
+/** Takes in the status line's figures; warns once when a window passes WARN_AT. */
+async function takeUsage(
+  $: EngineInterface,
+  figures: { rateLimits: readonly QuotaWindow[]; context: { percent?: number }; cost?: { usd: number } },
+) {
+  const windows = figures.rateLimits.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: w.resetsAt }))
+  await update($, usageAtom, () => ({ windows, contextPercent: figures.context.percent, costUsd: figures.cost?.usd }))
+  for (const w of windows) {
+    if (w.percentUsed >= WARN_AT && !warned.has(w.kind)) {
+      warned.add(w.kind)
+      $.ui.toast(`TrailBack: ${WINDOW_LABEL[w.kind] ?? w.kind} usage at ${w.percentUsed}%`)
+    }
+    if (w.percentUsed < WARN_AT) warned.delete(w.kind)
+  }
+}
+
+/** Go: switch to the picked entry now, then send a prompt that asks for a brief on it. */
+async function go($: EngineInterface) {
+  const [nodes, nextId] = await Promise.all([read($, nodesAtom), read($, nextAtom)])
+  const to = nodes.find(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
+  if (!to) return
+  const now = await $.clock.now()
+  await update($, nodesAtom, list => applyOp(list, { op: 'jump', id: to.id }, now))
+  await update($, nextAtom, () => '')
+  await refresh($)
+  await $.prompt.submit({ text: briefPrompt(to), asUser: true })
+}
+
 async function pick($: EngineInterface, id: string) {
   await update($, nextAtom, current => (current === id ? '' : id))
   await refresh($)
@@ -155,6 +197,7 @@ export const register: Register = on => {
     // Restore first: the trail comes back even if a registration below fails.
     await restore($)
     await refresh($)
+    await takeUsage($, await $.session.usage()).catch(() => undefined)
     await $.tool.register({
       name: 'stack',
       description:
@@ -164,7 +207,7 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'trail',
-      description: 'Show the TrailBack stack tree (args: arjun on|off, color rich|calm, motion on|off, reset, close)',
+      description: 'Show the TrailBack stack tree (args: arjun on|off, usage on|off, color rich|calm, motion on|off, reset, close)',
     })
 
     return next(e)
@@ -210,6 +253,8 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined && !e.isAborted) {
+      await update($, nodesAtom, list => addTurn(list, e.usage?.output_tokens ?? 0))
+      await saveStack($)
       const [nodes, isTouched] = await Promise.all([read($, nodesAtom), read($, touchedAtom)])
       if (nodes.length > 0 && !isTouched) {
         await update($, reminderAtom, () => true)
@@ -218,6 +263,12 @@ export const register: Register = on => {
     }
 
     return done
+  })
+
+  on('session.measure', async ($, e, next) => {
+    await takeUsage($, e).catch(() => undefined)
+
+    return next(e)
   })
 
   on('tool.call', { tool: 'mcp__trailback__stack' }, async ($, e) => {
@@ -246,6 +297,13 @@ export const register: Register = on => {
       await setArjun($, arg === 'arjun on')
 
       return { text: `Arjun ${arg === 'arjun on' ? 'on: one step at a time' : 'off: complete answers in one go'}.` }
+    }
+    if (arg === 'usage on' || arg === 'usage off') {
+      await update($, usageShownAtom, () => arg === 'usage on')
+      await savePrefs($)
+      await refresh($)
+
+      return { text: `TrailBack usage ${arg === 'usage on' ? 'on every row' : 'on the active entry only'}.` }
     }
     if (arg === 'motion off' || arg === 'motion on') {
       await update($, motionAtom, () => arg === 'motion on')
@@ -282,16 +340,47 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
-    const [nodes, motion, palette, isArjunOn, nextId, now] = await Promise.all([
+    const [nodes, motion, palette, isArjunOn, nextId, usage, isUsageShown, now] = await Promise.all([
       read($, nodesAtom),
       read($, motionAtom),
       read($, paletteAtom),
       read($, arjunAtom),
       read($, nextAtom),
+      read($, usageAtom),
+      read($, usageShownAtom),
       $.clock.now(),
     ])
     const isRich = palette === 'rich'
     const blink = isBlinkOn(now, motion)
+    const picked = nodes.find(n => n.id === nextId && n.state !== 'active' && n.state !== 'done')
+
+    const quota =
+      usage.windows.length > 0 || usage.contextPercent !== undefined || usage.costUsd !== undefined ? (
+        <Text wrap="truncate-end">
+          {usage.windows.map(w => (
+            <Text>
+              <Text dimColor>{WINDOW_LABEL[w.kind] ?? w.kind} </Text>
+              <Text color={levelColor(w.percentUsed)}>{bar(w.percentUsed, 8)}</Text>
+              <Text color={levelColor(w.percentUsed)} bold>
+                {' '}
+                {Math.round(w.percentUsed)}%
+              </Text>
+              <Text dimColor>
+                {w.resetsAt ? ` ↻${resetLabel(w.resetsAt, now)}` : ''}
+                {'   '}
+              </Text>
+            </Text>
+          ))}
+          {usage.contextPercent !== undefined && (
+            <Text>
+              <Text dimColor>ctx </Text>
+              <Text color={levelColor(usage.contextPercent)}>{Math.round(usage.contextPercent)}%</Text>
+              <Text>{'   '}</Text>
+            </Text>
+          )}
+          {usage.costUsd !== undefined && <Text dimColor>${usage.costUsd.toFixed(2)}</Text>}
+        </Text>
+      ) : undefined
 
     const header = (
       <Box flexDirection="row">
@@ -302,12 +391,20 @@ export const register: Register = on => {
           {isArjunOn ? ' on  ' : ' off '}
         </Text>
         <Text dimColor>{isArjunOn ? 'step by step' : 'one-shot answers'}</Text>
+        {picked && (
+          <Box marginLeft={2}>
+            <Button key="go" hotkey="g" variant="primary" onPress={() => go($)}>
+              {`Go ➜ ${picked.id}`}
+            </Button>
+          </Box>
+        )}
       </Box>
     )
 
     if (nodes.length === 0) {
       return (
         <Box flexDirection="column">
+          {quota}
           {header}
           <Text> </Text>
           <Text dimColor>No trail yet.</Text>
@@ -329,6 +426,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
+        {quota}
         {header}
         <Text wrap="truncate-end">
           {counts.map(([s, n]) =>
@@ -363,6 +461,7 @@ export const register: Register = on => {
           const isPickable = !isActive && state !== 'done'
           const markColor = isPausing ? 'claude' : isPicked ? 'text' : COLOR[state]
           const pathColor = COLOR.active
+          const spent = rollup(nodes, node.id)
           const badge = !isRich
             ? undefined
             : isPausing
@@ -412,23 +511,31 @@ export const register: Register = on => {
                     color={isActive || isPicked ? 'text' : isQuiet ? 'inactive' : COLOR[state]}
                     bold={isActive || isPicked}
                     dimColor={state === 'done'}
+                    strikethrough={state === 'done'}
                     inverse={isFlashing(node, now, motion)}
                   >
                     {'  '}
                     {node.title}
                   </Text>
+                  {(isActive || isUsageShown) && spent.turns > 0 && (
+                    <Text dimColor>
+                      {'  · '}
+                      {spent.turns} {spent.turns === 1 ? 'turn' : 'turns'} · {shortTokens(spent.outTokens)} out
+                    </Text>
+                  )}
                 </Text>
               </Box>
               {badge && (
                 <Box flexShrink={0} marginLeft={1}>
-                  <Text
-                    backgroundColor={badge.color}
-                    color="inverseText"
-                    bold
-                    dimColor={badge.isBlinking && !blink}
-                  >
-                    {` ${badge.text} `}
-                  </Text>
+                  {badge.isBlinking && !blink ? (
+                    <Text color={badge.color} bold>
+                      {` ${badge.text} `}
+                    </Text>
+                  ) : (
+                    <Text backgroundColor={badge.color} color="inverseText" bold>
+                      {` ${badge.text} `}
+                    </Text>
+                  )}
                 </Box>
               )}
             </Box>
@@ -451,7 +558,7 @@ export const register: Register = on => {
           </Text>
         </Text>
         <Text dimColor wrap="truncate-end">
-          › pick what to work on next · a toggles Arjun (focus the pane with ctrl+x tab)
+          › pick next · g go · a Arjun (focus the pane with ctrl+x tab)
         </Text>
       </Box>
     )
